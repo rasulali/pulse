@@ -1,111 +1,65 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const sadmin = () =>
-  createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SECRET_KEY!,
-    { auth: { persistSession: false } },
-  );
+type Payload = {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  industryIds: number[];
+  signalIds: number[];
+};
 
-const rx = /[A-Za-z\u00C0-\u024F\u0400-\u04FF]/u;
-const norm = (u: string) => {
+export async function POST(req: Request) {
   try {
-    const x = new URL(u);
-    return `${x.origin}${x.pathname.replace(/\/+$/, "")}`;
-  } catch {
-    return u;
+    const b = (await req.json()) as Payload;
+    const email = (b.email || "").toLowerCase().trim();
+    if (!email || !email.includes("@")) {
+      return NextResponse.json({ error: "invalid email" }, { status: 400 });
+    }
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SECRET_KEY!,
+    );
+
+    const { data: existing, error: findErr } = await supabase
+      .from("users")
+      .select("id")
+      .eq("email", email)
+      .limit(1);
+
+    if (findErr) {
+      return NextResponse.json({ error: findErr.message }, { status: 400 });
+    }
+    if (existing && existing.length > 0) {
+      return NextResponse.json(
+        { error: "This user already exists" },
+        { status: 409 },
+      );
+    }
+
+    const token = crypto.randomUUID();
+    const { error: insErr } = await supabase.from("users").insert([
+      {
+        email,
+        first_name: b.firstName ?? null,
+        last_name: b.lastName ?? null,
+        industry_ids: b.industryIds,
+        signal_ids: b.signalIds,
+        telegram_start_token: token,
+      },
+    ]);
+
+    if (insErr) {
+      return NextResponse.json({ error: insErr.message }, { status: 400 });
+    }
+
+    const link = `https://t.me/${process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME}?start=${token}`;
+    return NextResponse.json({ telegramLink: link });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "error" },
+      { status: 400 },
+    );
   }
-};
-
-type ApifyItem = {
-  authorProfileUrl?: string;
-  authorFullName?: string;
-  authorHeadline?: string;
-  author?: { occupation?: string; publicId?: string };
-  activityOfUser?: { occupation?: string };
-};
-
-export async function POST() {
-  const supa = sadmin();
-  const { data: cfg } = await supa
-    .from("apify_scraper_options")
-    .select(
-      "cookie_default,user_agent,min_delay,max_delay,deep_scrape,raw_data,proxy",
-    )
-    .limit(1)
-    .single();
-  if (!cfg) return NextResponse.json({ ok: false }, { status: 500 });
-
-  const { data: rows } = await supa.from("linkedin").select("url");
-  const urls = (rows || []).map((r: any) => r.url).filter(Boolean);
-  if (!urls.length) return NextResponse.json({ ok: true, updated: 0 });
-
-  const payload = {
-    cookie: cfg.cookie_default,
-    userAgent: cfg.user_agent,
-    urls,
-    limitPerSource: 1,
-    deepScrape: cfg.deep_scrape,
-    rawData: cfg.raw_data,
-    minDelay: cfg.min_delay,
-    maxDelay: cfg.max_delay,
-    proxy: cfg.proxy,
-  };
-
-  const res = await fetch(
-    "https://api.apify.com/v2/acts/curious_coder~linkedin-post-search-scraper/run-sync-get-dataset-items" +
-      "?token=" +
-      process.env.APIFY_TOKEN +
-      "&memory=8192",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    },
-  );
-  if (!res.ok) return NextResponse.json({ ok: false }, { status: 502 });
-
-  const items = (await res.json()) as ApifyItem[] | unknown;
-  if (!Array.isArray(items)) return NextResponse.json({ ok: true, updated: 0 });
-
-  const map: Record<string, { name: string; occ: string; head: string }> = {};
-  for (const it of items as ApifyItem[]) {
-    const au =
-      it?.authorProfileUrl ||
-      (it?.author?.publicId
-        ? `https://www.linkedin.com/in/${it.author.publicId}`
-        : "");
-    if (!au) continue;
-    const u = norm(au);
-    const name = (it?.authorFullName || "").trim();
-    const occ = (
-      it?.author?.occupation ||
-      it?.activityOfUser?.occupation ||
-      ""
-    ).trim();
-    const head = (it?.authorHeadline || "").trim();
-    map[u] = { name, occ, head };
-  }
-
-  let updated = 0;
-  for (const [u, v] of Object.entries(map)) {
-    const useOcc = !!(v.occ && rx.test(v.occ));
-    const useHead = !useOcc && !!v.head;
-    const allowed = useOcc || useHead;
-    const { data, error } = await supa
-      .from("linkedin")
-      .update({
-        name: v.name || null,
-        occupation: useOcc ? v.occ : null,
-        headline: useHead ? v.head : null,
-        allowed,
-      })
-      .eq("url", u)
-      .select("id");
-    if (!error) updated += (data?.length as number | undefined) ?? 0;
-  }
-
-  return NextResponse.json({ ok: true, updated });
 }
