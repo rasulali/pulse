@@ -20,30 +20,28 @@ export async function POST(req: Request) {
   const chatId = msg?.chat?.id;
   if (!text || !chatId) return NextResponse.json({ ok: true });
 
-  if (!text.startsWith("/start ")) return NextResponse.json({ ok: true });
-  const token = text.split(" ")[1];
-  if (!token) return NextResponse.json({ ok: true });
+  const m = /^\/start\s+(\S+)/.exec(text);
+  if (!m) return NextResponse.json({ ok: true });
+  const token = m[1];
 
   const sb = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!,
   );
 
-  const { data: rows, error: findErr } = await sb
+  const { data: rows } = await sb
     .from("users")
     .select("id, telegram_chat_id")
     .eq("telegram_start_token", token)
     .limit(1);
 
-  if (findErr || !rows?.length) return NextResponse.json({ ok: true });
-
+  if (!rows?.length) return NextResponse.json({ ok: true });
   const user = rows[0];
-
   if (user.telegram_chat_id) return NextResponse.json({ ok: true });
 
   const { error: updErr } = await sb
     .from("users")
-    .update({ telegram_chat_id: chatId })
+    .update({ telegram_chat_id: chatId, telegram_start_token: null })
     .eq("id", user.id);
 
   if (updErr) return NextResponse.json({ ok: true });
@@ -53,7 +51,8 @@ export async function POST(req: Request) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       chat_id: chatId,
-      text: "♥ Connected! You’ll start receiving daily reports here.",
+      text: "Connected! You’ll start receiving daily reports here.",
+      reply_markup: { remove_keyboard: true },
     }),
   });
 

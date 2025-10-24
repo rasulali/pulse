@@ -19,11 +19,44 @@ const norm = (u: string) => {
 };
 
 type ApifyItem = {
+  inputUrl?: string;
   authorProfileUrl?: string;
+  authorName?: string;
   authorFullName?: string;
   authorHeadline?: string;
-  author?: { occupation?: string; publicId?: string };
-  activityOfUser?: { occupation?: string };
+  author?: {
+    occupation?: string;
+    publicId?: string;
+    firstName?: string;
+    lastName?: string;
+  };
+  activityOfUser?: {
+    occupation?: string;
+    publicId?: string;
+    firstName?: string;
+    lastName?: string;
+  };
+  activityDescription?: { occupation?: string };
+};
+
+const pickOcc = (x: ApifyItem) =>
+  (
+    x?.author?.occupation ||
+    x?.activityOfUser?.occupation ||
+    x?.activityDescription?.occupation ||
+    ""
+  ).trim();
+
+const pickName = (x: ApifyItem) => {
+  const n = (x?.authorName || x?.authorFullName || "").trim();
+  if (n) return n;
+  const fn = (x?.author?.firstName || "").trim();
+  const ln = (x?.author?.lastName || "").trim();
+  const a = [fn, ln].filter(Boolean).join(" ").trim();
+  if (a) return a;
+  const afn = (x?.activityOfUser?.firstName || "").trim();
+  const aln = (x?.activityOfUser?.lastName || "").trim();
+  return [afn, aln].filter(Boolean).join(" ").trim();
 };
 
 export async function POST() {
@@ -72,34 +105,34 @@ export async function POST() {
 
   const map: Record<string, { name: string; occ: string; head: string }> = {};
   for (const it of items as ApifyItem[]) {
-    const au =
-      it?.authorProfileUrl ||
-      (it?.author?.publicId
-        ? `https://www.linkedin.com/in/${it.author.publicId}`
-        : "");
-    if (!au) continue;
-    const u = norm(au);
-    const name = (it?.authorFullName || "").trim();
-    const occ = (
-      it?.author?.occupation ||
-      it?.activityOfUser?.occupation ||
-      ""
-    ).trim();
+    const target = norm(
+      it?.inputUrl ||
+        it?.authorProfileUrl ||
+        (it?.author?.publicId
+          ? `https://www.linkedin.com/in/${it.author.publicId}`
+          : "") ||
+        (it?.activityOfUser?.publicId
+          ? `https://www.linkedin.com/in/${it.activityOfUser.publicId}`
+          : ""),
+    );
+    if (!target) continue;
+    const name = pickName(it);
+    const occ = pickOcc(it);
     const head = (it?.authorHeadline || "").trim();
-    map[u] = { name, occ, head };
+    map[target] = { name, occ, head };
   }
 
   let updated = 0;
   for (const [u, v] of Object.entries(map)) {
-    const useOcc = !!(v.occ && rx.test(v.occ));
-    const useHead = !useOcc && !!v.head;
-    const allowed = useOcc || useHead;
+    const validOcc = !!(v.occ && rx.test(v.occ));
+    const validHead = !validOcc && !!(v.head && rx.test(v.head));
+    const allowed = validOcc || validHead;
     const { data, error } = await supa
       .from("linkedin")
       .update({
         name: v.name || null,
-        occupation: useOcc ? v.occ : null,
-        headline: useHead ? v.head : null,
+        occupation: validOcc ? v.occ : null,
+        headline: validHead ? v.head : null,
         allowed,
       })
       .eq("url", u)
