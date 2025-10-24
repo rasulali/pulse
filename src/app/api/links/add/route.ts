@@ -5,51 +5,65 @@ const sadmin = () =>
   createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!,
-    { auth: { persistSession: false } },
+    {
+      auth: { persistSession: false },
+    },
   );
 
-const normalize = (raw: string): string => {
-  const s = (raw || "").trim();
-  if (!s) return "";
-  const prefixed = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+const norm = (u: string) => {
   try {
-    const u = new URL(prefixed);
-    if (
-      !/linkedin\.com$/i.test(u.hostname) &&
-      !/\.linkedin\.com$/i.test(u.hostname)
-    )
-      return "";
-    return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+    const x = new URL(u);
+    return `${x.origin}${x.pathname.replace(/\/+$/, "")}`;
   } catch {
-    return "";
+    return u;
   }
 };
 
 export async function POST(req: Request) {
-  const ct = req.headers.get("content-type") || "";
-  let url = "";
-  if (ct.includes("application/json")) {
-    try {
-      const body = (await req.json()) as { url?: string };
-      url = body?.url || "";
-    } catch {}
-  } else {
-    url = await req.text();
-  }
-  const u = normalize(url);
-  if (!u)
+  const { url, industry_ids } = (await req.json()) as {
+    url: string;
+    industry_ids: number[];
+  };
+  if (!url)
     return NextResponse.json(
-      { ok: false, message: "invalid_url" },
+      { ok: false, message: "url_required" },
       { status: 400 },
     );
+  if (!Array.isArray(industry_ids) || industry_ids.length === 0)
+    return NextResponse.json(
+      { ok: false, message: "industry_required" },
+      { status: 400 },
+    );
+
   const supa = sadmin();
+  let ids = industry_ids
+    .filter((n: unknown) => Number.isInteger(n as number))
+    .map((n: any) => Number(n));
+
+  const { data: valid } = await supa
+    .from("industries")
+    .select("id")
+    .in("id", ids);
+  const allow = new Set((valid || []).map((r: any) => Number(r.id)));
+  ids = ids.filter((id) => allow.has(id));
+  if (ids.length === 0)
+    return NextResponse.json(
+      { ok: false, message: "industry_invalid" },
+      { status: 400 },
+    );
+
+  const u = norm(url);
   const { error } = await supa
     .from("linkedin")
-    .upsert([{ url: u }], { onConflict: "url", ignoreDuplicates: true });
+    .upsert(
+      { url: u, allowed: false, industry_ids: ids },
+      { onConflict: "url", ignoreDuplicates: false },
+    );
+
   if (error)
     return NextResponse.json(
       { ok: false, message: "upsert_failed" },
-      { status: 500 },
+      { status: 400 },
     );
   return NextResponse.json({ ok: true });
 }

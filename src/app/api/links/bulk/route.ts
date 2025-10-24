@@ -5,59 +5,68 @@ const sadmin = () =>
   createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!,
-    { auth: { persistSession: false } },
+    {
+      auth: { persistSession: false },
+    },
   );
 
-const normalize = (raw: string): string => {
-  const s = (raw || "").trim();
-  if (!s) return "";
-  const prefixed = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+const norm = (u: string) => {
   try {
-    const u = new URL(prefixed);
-    if (
-      !/linkedin\.com$/i.test(u.hostname) &&
-      !/\.linkedin\.com$/i.test(u.hostname)
-    )
-      return "";
-    return `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+    const x = new URL(u);
+    return `${x.origin}${x.pathname.replace(/\/+$/, "")}`;
   } catch {
-    return "";
+    return u;
   }
-};
-
-const readLines = async (req: Request): Promise<string[]> => {
-  const ct = req.headers.get("content-type") || "";
-  if (ct.includes("application/json")) {
-    try {
-      const body = await req.json();
-      if (typeof body === "string") return body.split(/\r?\n/);
-    } catch {}
-  }
-  const text = await req.text();
-  return text ? text.split(/\r?\n/) : [];
 };
 
 export async function POST(req: Request) {
   const supa = sadmin();
-  const raw = await readLines(req);
-  const rows = Array.from(new Set(raw.map(normalize)))
+  const url = new URL(req.url);
+  const rawIds = (url.searchParams.get("industry_ids") || "")
+    .split(",")
+    .map((s) => s.trim())
     .filter(Boolean)
-    .map((url) => ({ url }));
-  if (!rows.length)
+    .map((s) => Number(s))
+    .filter((n) => Number.isInteger(n));
+
+  if (rawIds.length === 0)
     return NextResponse.json(
-      { ok: false, message: "no_valid_urls" },
+      { ok: false, message: "industry_required" },
       { status: 400 },
     );
-  for (let i = 0; i < rows.length; i += 500) {
-    const chunk = rows.slice(i, i + 500);
-    const { error } = await supa
-      .from("linkedin")
-      .upsert(chunk, { onConflict: "url", ignoreDuplicates: true });
-    if (error)
-      return NextResponse.json(
-        { ok: false, message: "upsert_failed" },
-        { status: 500 },
-      );
-  }
-  return NextResponse.json({ ok: true, added: rows.length });
+
+  const { data: valid } = await supa
+    .from("industries")
+    .select("id")
+    .in("id", rawIds);
+  const allow = new Set((valid || []).map((r: any) => Number(r.id)));
+  const ids = rawIds.filter((id) => allow.has(id));
+  if (ids.length === 0)
+    return NextResponse.json(
+      { ok: false, message: "industry_invalid" },
+      { status: 400 },
+    );
+
+  const text = await req.text();
+  const urls = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map(norm);
+
+  if (!urls.length) return NextResponse.json({ ok: true, inserted: 0 });
+
+  const rows = urls.map((u) => ({ url: u, allowed: false, industry_ids: ids }));
+
+  const { error, data } = await supa
+    .from("linkedin")
+    .upsert(rows, { onConflict: "url", ignoreDuplicates: false })
+    .select("id");
+
+  if (error)
+    return NextResponse.json(
+      { ok: false, message: "upsert_failed" },
+      { status: 400 },
+    );
+  return NextResponse.json({ ok: true, inserted: data.length });
 }
