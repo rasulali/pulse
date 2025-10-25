@@ -1014,28 +1014,50 @@ failed ←---+----+------+------------+------------+-----------+
 
 ```json
 {
-  "source_fields": {
-    "occupation_candidates": [
-      "author.occupation",
-      "activityOfUser.occupation",
-      "activityDescription.occupation"
-    ],
-    "headline_candidate": "authorHeadline",
-    "name_candidates": ["authorName", "authorFullName", "author.firstName + ' ' + author.lastName"]
+  "routing_logic": {
+    "isActivity_true": {
+      "description": "Post is a repost/activity (reposter data available)",
+      "name_source": "activityOfUser.firstName + activityOfUser.lastName",
+      "occupation_source": "activityOfUser.occupation",
+      "headline_source": "IGNORE (not available for reposters)"
+    },
+    "isActivity_false": {
+      "description": "Post is original (author data available)",
+      "name_source": "author.firstName + author.lastName",
+      "occupation_source": "author.occupation",
+      "headline_source": "authorHeadline"
+    }
   },
   "validation": {
     "alpha_regex": "[A-Za-z\\u00C0-\\u024F\\u0400-\\u04FF]",
-    "occupation_first": true,
-    "headline_second": true,
-    "one_or_the_other_never_both": true,
-    "flag_when_missing_or_non_alpha": true
+    "occupation_and_headline_independent": true,
+    "both_can_be_stored": true,
+    "allowed_requires_at_least_one_valid": true
   },
   "persistence": {
-    "if_valid_occupation":   { "occupation": "<value>", "headline": null },
-    "else_if_valid_headline":{ "occupation": null,       "headline": "<value>" },
-    "else":                  { "occupation": null,       "headline": null, "allowed_hint": "stay or move to not allowed" },
-    "always_store_name":     true
-  }
+    "name": "always store if available",
+    "occupation": "store if valid (contains alpha chars), else null",
+    "headline": "store if valid (contains alpha chars) AND isActivity=false, else null",
+    "allowed": "true if (validOccupation OR validHeadline), false otherwise"
+  },
+  "examples": [
+    {
+      "case": "isActivity=true, valid occupation",
+      "result": { "name": "Gunay Abdulsalamova", "occupation": "Senior corporate customer service...", "headline": null, "allowed": true }
+    },
+    {
+      "case": "isActivity=false, valid occupation AND headline",
+      "result": { "name": "Abbas Ibrahimov", "occupation": "CEO / Chairman...", "headline": "CEO / Chairman...", "allowed": true }
+    },
+    {
+      "case": "isActivity=false, occupation invalid, headline valid",
+      "result": { "name": "John Doe", "occupation": null, "headline": "Software Engineer", "allowed": true }
+    },
+    {
+      "case": "both invalid",
+      "result": { "name": "Jane Doe", "occupation": null, "headline": null, "allowed": false }
+    }
+  ]
 }
 ```
 

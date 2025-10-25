@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { ApifyItem } from "../links.types";
 
 const sadmin = () =>
   createClient(
@@ -18,41 +19,27 @@ const norm = (u: string) => {
   }
 };
 
-type ApifyItem = {
-  inputUrl?: string;
-  authorProfileUrl?: string;
-  authorHeadline?: string;
-  author?: {
-    occupation?: string;
-    publicId?: string;
-    firstName?: string;
-    lastName?: string;
-  };
-  activityOfUser?: {
-    occupation?: string;
-    publicId?: string;
-    firstName?: string;
-    lastName?: string;
-  };
-  activityDescription?: { occupation?: string };
+const pickOcc = (x: ApifyItem) => {
+  if (x?.isActivity) {
+    return (x?.activityOfUser?.occupation || "").trim();
+  }
+  return (x?.author?.occupation || "").trim();
 };
 
-const pickOcc = (x: ApifyItem) =>
-  (
-    x?.author?.occupation ||
-    x?.activityOfUser?.occupation ||
-    x?.activityDescription?.occupation ||
-    ""
-  ).trim();
-
 const pickName = (x: ApifyItem) => {
+  if (x?.isActivity) {
+    const fn = (x?.activityOfUser?.firstName || "").trim();
+    const ln = (x?.activityOfUser?.lastName || "").trim();
+    return [fn, ln].filter(Boolean).join(" ").trim();
+  }
   const fn = (x?.author?.firstName || "").trim();
   const ln = (x?.author?.lastName || "").trim();
-  const a = [fn, ln].filter(Boolean).join(" ").trim();
-  if (a) return a;
-  const afn = (x?.activityOfUser?.firstName || "").trim();
-  const aln = (x?.activityOfUser?.lastName || "").trim();
-  return [afn, aln].filter(Boolean).join(" ").trim();
+  return [fn, ln].filter(Boolean).join(" ").trim();
+};
+
+const pickHead = (x: ApifyItem) => {
+  if (x?.isActivity) return "";
+  return (x?.authorHeadline || "").trim();
 };
 
 export async function POST() {
@@ -114,7 +101,7 @@ export async function POST() {
     if (!target) continue;
     const name = pickName(it);
     const occ = pickOcc(it);
-    const head = (it?.authorHeadline || "").trim();
+    const head = pickHead(it);
     map[target] = { name, occ, head };
   }
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { ApifyItem } from "../links.types";
 
 const sadmin = () =>
   createClient(
@@ -9,25 +10,6 @@ const sadmin = () =>
   );
 
 type Body = { datasetUrl?: string };
-type ApifyItem = {
-  inputUrl?: string;
-  authorProfileUrl?: string;
-  authorName?: string;
-  authorHeadline?: string;
-  author?: {
-    occupation?: string;
-    publicId?: string;
-    firstName?: string;
-    lastName?: string;
-  };
-  activityOfUser?: {
-    occupation?: string;
-    publicId?: string;
-    firstName?: string;
-    lastName?: string;
-  };
-  activityDescription?: { occupation?: string };
-};
 
 const rx = /[A-Za-z\u00C0-\u024F\u0400-\u04FF]/u;
 const norm = (u: string) => {
@@ -39,22 +21,27 @@ const norm = (u: string) => {
   }
 };
 
-const pickOcc = (x: ApifyItem) =>
-  (
-    x?.author?.occupation ||
-    x?.activityOfUser?.occupation ||
-    x?.activityDescription?.occupation ||
-    ""
-  ).trim();
+const pickOcc = (x: ApifyItem) => {
+  if (x?.isActivity) {
+    return (x?.activityOfUser?.occupation || "").trim();
+  }
+  return (x?.author?.occupation || "").trim();
+};
 
 const pickName = (x: ApifyItem) => {
+  if (x?.isActivity) {
+    const fn = (x?.activityOfUser?.firstName || "").trim();
+    const ln = (x?.activityOfUser?.lastName || "").trim();
+    return [fn, ln].filter(Boolean).join(" ").trim();
+  }
   const fn = (x?.author?.firstName || "").trim();
   const ln = (x?.author?.lastName || "").trim();
-  const a = [fn, ln].filter(Boolean).join(" ").trim();
-  if (a) return a;
-  const afn = (x?.activityOfUser?.firstName || "").trim();
-  const aln = (x?.activityOfUser?.lastName || "").trim();
-  return [afn, aln].filter(Boolean).join(" ").trim();
+  return [fn, ln].filter(Boolean).join(" ").trim();
+};
+
+const pickHead = (x: ApifyItem) => {
+  if (x?.isActivity) return "";
+  return (x?.authorHeadline || "").trim();
 };
 
 export async function POST(req: Request) {
@@ -88,7 +75,7 @@ export async function POST(req: Request) {
     if (!target) continue;
     const name = pickName(raw);
     const occ = pickOcc(raw);
-    const head = (raw?.authorHeadline || "").trim();
+    const head = pickHead(raw);
     map[target] = { name, occ, head };
   }
 

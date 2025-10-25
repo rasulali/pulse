@@ -197,20 +197,31 @@ notify admins (if retry_count >= max_retries)
 1. Extract profile URL
 2. Find linkedin profile in DB by URL
 3. Skip if profile not found
-4. Extract occupation/headline with fallbacks:
+4. Extract occupation/headline/name based on `isActivity` flag:
    ```ts
-   occupation = item.author?.occupation || item.activityOfUser?.occupation || item.activityDescription?.occupation
-   headline = item.authorHeadline
+   if (item.isActivity === true) {
+     // Repost: use reposter data
+     name = item.activityOfUser?.firstName + ' ' + item.activityOfUser?.lastName
+     occupation = item.activityOfUser?.occupation
+     headline = '' // Not available for reposters
+   } else {
+     // Original post: use author data
+     name = item.author?.firstName + ' ' + item.author?.lastName
+     occupation = item.author?.occupation
+     headline = item.authorHeadline
+   }
    ```
 5. **Verify** against linkedin table:
-   - If profile.occupation exists: check `scrapedOccupation === profile.occupation`
-   - If profile.headline exists: check `scrapedHeadline === profile.headline`
-   - If mismatch: set `allowed=false`, skip post
+   - Validate occupation: check if contains alphabetic characters
+   - Validate headline: check if contains alphabetic characters (only if isActivity=false)
+   - Compare with stored profile data:
+     - If profile.occupation exists AND scraped occupation valid: check exact match
+     - If profile.headline exists AND scraped headline valid: check exact match
+     - If mismatch: set `allowed=false`, skip post
 6. Extract URN, check if exists in posts (deduplicate)
 7. Filter posts older than 24h (postedAtTimestamp)
 8. Clean text (remove emojis, control chars, collapse whitespace)
-9. Extract name (firstName + lastName with fallbacks)
-10. Insert into posts table
+9. Insert into posts table with industry_ids from profile
 
 **Output**:
 ```json
