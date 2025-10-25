@@ -21,8 +21,6 @@ const norm = (u: string) => {
 type ApifyItem = {
   inputUrl?: string;
   authorProfileUrl?: string;
-  authorName?: string;
-  authorFullName?: string;
   authorHeadline?: string;
   author?: {
     occupation?: string;
@@ -48,8 +46,6 @@ const pickOcc = (x: ApifyItem) =>
   ).trim();
 
 const pickName = (x: ApifyItem) => {
-  const n = (x?.authorName || x?.authorFullName || "").trim();
-  if (n) return n;
   const fn = (x?.author?.firstName || "").trim();
   const ln = (x?.author?.lastName || "").trim();
   const a = [fn, ln].filter(Boolean).join(" ").trim();
@@ -62,7 +58,7 @@ const pickName = (x: ApifyItem) => {
 export async function POST() {
   const supa = sadmin();
   const { data: cfg } = await supa
-    .from("apify_scraper_options")
+    .from("config")
     .select(
       "cookie_default,user_agent,min_delay,max_delay,deep_scrape,raw_data,proxy",
     )

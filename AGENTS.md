@@ -1,7 +1,9 @@
 # AGENTS.md
 
-**Purpose:** Canonical, LLM-friendly blueprint of Pulse AI’s app, auth, DB, endpoints, and policies.
+**Purpose:** Canonical, LLM-friendly blueprint of Pulse AI's app, auth, DB, endpoints, and policies.
 **Rule:** Keep this file accurate. Update on any change to envs, schema, RLS, routes, or endpoints.
+
+**Current Status**: Planning phase complete. Database migrated. Pipeline endpoints designed but not yet implemented. See PLAN.md STATUS section for detailed checklist.
 
 ---
 
@@ -37,13 +39,19 @@
     "APIFY_TOKEN": "<string>",
     "APIFY_ACTOR": "curious_coder~linkedin-post-search-scraper",
     "APIFY_MEMORY_MBYTES": "8192",
-    "APIFY_DEFAULT_DATASET_URL": "<string?>"
+    "OPENAI_API_KEY": "<string>",
+    "PINECONE_API_KEY": "<string>",
+    "PINECONE_INDEX_NAME": "pulse-linkedin",
+    "COHERE_API_KEY": "NOT_NEEDED (uses Pinecone's native Cohere integration)"
   },
   "notes": [
     "Public keys are client-exposed; server_only keys must never be exposed.",
     "Webhook compares 'x-telegram-bot-api-secret-token' to TELEGRAM_WEBHOOK_SECRET.",
     "APIFY_TOKEN is required for actor runs and dataset fetch.",
-    "APIFY_MEMORY_MBYTES=8192 configures 8GB without optional add-ons."
+    "APIFY_MEMORY_MBYTES=8192 configures 8GB without optional add-ons.",
+    "OPENAI_API_KEY used for embeddings (text-embedding-3-small) and message generation (gpt-5-mini).",
+    "PINECONE_API_KEY and PINECONE_INDEX_NAME for vector storage (1536 dims, single namespace).",
+    "Pinecone's native Cohere reranking is used (no separate COHERE_API_KEY required)."
   ]
 }
 ```
@@ -113,9 +121,10 @@
         "method": "POST",
         "auth": "server-only (SUPABASE_SECRET_KEY)",
         "input": {
-            "url": "string"
+            "url": "string",
+            "industry_ids": "number[]"
         },
-        "effect": "Insert linkedin.allowed=false"
+        "effect": "Insert linkedin.allowed=false with industry_ids"
     },
     "/api/links/bulk": {
         "method": "POST",
@@ -157,7 +166,7 @@
     "/api/links/refresh": {
         "method": "POST",
         "auth": "server-only",
-        "effect": "Run APIFY actor with 8GB; limitPerSource=1; urls from linkedin.allowed=true"
+        "effect": "Run APIFY actor sync with 8GB; uses config table settings"
     },
     "/api/links/refresh-one": {
         "method": "POST",
@@ -165,15 +174,7 @@
         "input": {
             "id": "number"
         },
-        "effect": "Run actor for a single linkedin.url"
-    },
-    "/api/links/refresh-from-dataset": {
-        "method": "POST",
-        "auth": "server-only",
-        "input": {
-            "datasetUrl?": "string"
-        },
-        "effect": "Pull results from dataset (datasetUrl or APIFY_DEFAULT_DATASET_URL)"
+        "effect": "Run actor sync for a single linkedin.url"
     },
     "/api/register": {
         "method": "POST",
@@ -221,6 +222,155 @@
             "400 invalid token",
             "404 token not found"
         ]
+    },
+    "/api/scrape/verify-and-run": {
+        "method": "POST",
+        "auth": "server-only",
+        "input": "none",
+        "process": [
+            "Fetch config singleton",
+            "Fetch linkedin WHERE allowed=true",
+            "Build Apify payload with profile URLs",
+            "Start ASYNC Apify run (returns run_id immediately)",
+            "Create pipeline_jobs row with status='scraping', apify_run_id"
+        ],
+        "output": {
+            "ok": true,
+            "apify_run_id": "string"
+        },
+        "notes": ["Does NOT wait for completion; polling done by /api/scrape/check-apify"]
+    },
+    "/api/scrape/check-apify": {
+        "method": "POST",
+        "auth": "server-only",
+        "input": "none",
+        "process": [
+            "Get current pipeline_jobs row with status='scraping'",
+            "Check Apify run status via API",
+            "If SUCCEEDED: fetch dataset, count items, update status='processing'",
+            "If RUNNING: do nothing",
+            "If FAILED: increment retry_count or set status='failed'"
+        ],
+        "output": {
+            "ok": true,
+            "status": "SUCCEEDED | RUNNING | FAILED",
+            "total_items": "number?"
+        }
+    },
+    "/api/scrape/process-posts": {
+        "method": "POST",
+        "auth": "server-only",
+        "input": {
+            "batch_offset": "number",
+            "batch_size": "number (default: 10)"
+        },
+        "process": [
+            "Fetch items from Apify dataset (batch_offset, batch_size)",
+            "For each item:",
+            "  - Extract profile URL, find linkedin profile",
+            "  - Extract occupation/headline with fallbacks",
+            "  - Verify: if profile.occupation exists, check exact match; if profile.headline exists, check exact match",
+            "  - If mismatch: set allowed=false, skip",
+            "  - Check URN exists in posts (deduplicate)",
+            "  - Filter posts older than 24h",
+            "  - Clean text (emojis, control chars, whitespace)",
+            "  - Extract name with fallbacks",
+            "  - Insert into posts with industry_ids from profile",
+            "Update pipeline_jobs: increment current_batch_offset",
+            "If done (offset >= total_items): set status='vectorizing', reset offset"
+        ],
+        "output": {
+            "ok": true,
+            "inserted": "number",
+            "skipped": "number"
+        }
+    },
+    "/api/scrape/vectorize": {
+        "method": "POST",
+        "auth": "server-only",
+        "input": {
+            "batch_offset": "number",
+            "batch_size": "number (default: 10)"
+        },
+        "process": [
+            "If batch_offset=0: delete all Pinecone vectors (namespace='default')",
+            "Fetch posts WHERE created_at >= now()-24h LIMIT batch_size OFFSET batch_offset",
+            "Generate embeddings via OpenAI (text-embedding-3-small, 1536 dims)",
+            "Build vectors with metadata: {industry_ids, text}",
+            "Upsert to Pinecone namespace='default'",
+            "Update pipeline_jobs: increment current_batch_offset",
+            "If done: set status='generating', reset offset"
+        ],
+        "output": {
+            "ok": true,
+            "vectorized": "number"
+        }
+    },
+    "/api/signals/generate": {
+        "method": "POST",
+        "auth": "server-only",
+        "input": {
+            "batch_offset": "number"
+        },
+        "process": [
+            "Fetch config.message_system_prompt",
+            "Fetch industries WHERE visible=true",
+            "Fetch signals WHERE visible=true",
+            "Calculate pair at batch_offset: industryIdx = floor(offset/signals.length), signalIdx = offset%signals.length",
+            "Generate embedding from signal.prompt",
+            "Query Pinecone: vector=embedding, topK=10, filter={industry_ids: {$in: [industry.id]}}, rerankQuery=signal.prompt",
+            "Format context from results",
+            "Call GPT-5-mini with systemPrompt + userMessage",
+            "Insert message into messages table",
+            "Update pipeline_jobs: increment current_batch_offset",
+            "If done (offset >= total_pairs): set status='sending', count users, reset offset"
+        ],
+        "output": {
+            "ok": true,
+            "generated": 1
+        }
+    },
+    "/api/telegram/send-batch": {
+        "method": "POST",
+        "auth": "server-only",
+        "input": {
+            "batch_offset": "number",
+            "batch_size": "number (default: 10)"
+        },
+        "process": [
+            "Fetch today's messages",
+            "Fetch 10 users WHERE telegram_chat_id IS NOT NULL LIMIT 10 OFFSET batch_offset",
+            "For each user: filter messages by industry_ids AND signal_ids",
+            "Send via Telegram API with parse_mode='HTML'",
+            "Update pipeline_jobs: increment current_batch_offset",
+            "If done: set status='completed'"
+        ],
+        "output": {
+            "ok": true,
+            "sent": "number"
+        }
+    },
+    "/api/cron/advance": {
+        "method": "POST",
+        "auth": "Cloudflare Cron Trigger",
+        "schedule": "*/5 * * * * (every 5 minutes)",
+        "process": [
+            "Get active pipeline_jobs row (status NOT IN ['completed', 'failed'])",
+            "If none exists AND hour=4: create new job with status='idle'",
+            "Switch on job.status:",
+            "  - 'idle': call /api/scrape/verify-and-run",
+            "  - 'scraping': call /api/scrape/check-apify",
+            "  - 'processing': call /api/scrape/process-posts with batch params",
+            "  - 'vectorizing': call /api/scrape/vectorize with batch params",
+            "  - 'generating': call /api/signals/generate with batch params",
+            "  - 'sending': call /api/telegram/send-batch with batch params",
+            "On error: increment retry_count; if >= max_retries: set status='failed', notify admins via Telegram"
+        ],
+        "output": {
+            "ok": true,
+            "current_status": "string",
+            "progress": "string (e.g., '30/150')"
+        }
     }
 }
 ```
@@ -248,16 +398,28 @@
 ### RLS_POLICIES_SQL (idempotent; execute in Supabase SQL editor)
 
 ```sql
-alter table public.linkedin       enable row level security;
-alter table public.scraper_input  enable row level security;
+alter table public.linkedin                enable row level security;
+alter table public.config                  enable row level security;
+alter table public.posts                   enable row level security;
+alter table public.messages                enable row level security;
 
 create policy if not exists linkedin_crud_authed
 on public.linkedin for all
 to authenticated
 using (true) with check (true);
 
-create policy if not exists scraper_input_crud_authed
-on public.scraper_input for all
+create policy if not exists config_crud_authed
+on public.config for all
+to authenticated
+using (true) with check (true);
+
+create policy if not exists posts_crud_authed
+on public.posts for all
+to authenticated
+using (true) with check (true);
+
+create policy if not exists messages_crud_authed
+on public.messages for all
 to authenticated
 using (true) with check (true);
 
@@ -395,7 +557,7 @@ to authenticated using (true);
         },
         {
             "schema": "public",
-            "name": "scraper_input",
+            "name": "config",
             "columns": [
                 {
                     "name": "id",
@@ -406,25 +568,20 @@ to authenticated using (true);
                 {
                     "name": "cookie_default",
                     "type": "jsonb",
-                    "not_null": true
+                    "not_null": true,
+                    "default": "[]::jsonb"
                 },
                 {
                     "name": "limit_per_source",
                     "type": "int4",
                     "not_null": true,
-                    "default": "1"
+                    "default": "2"
                 },
                 {
-                    "name": "deep_scrape",
-                    "type": "boolean",
+                    "name": "user_agent",
+                    "type": "text",
                     "not_null": true,
-                    "default": "false"
-                },
-                {
-                    "name": "raw_data",
-                    "type": "boolean",
-                    "not_null": true,
-                    "default": "false"
+                    "default": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
                 },
                 {
                     "name": "min_delay",
@@ -439,16 +596,35 @@ to authenticated using (true);
                     "default": "8"
                 },
                 {
+                    "name": "deep_scrape",
+                    "type": "boolean",
+                    "not_null": true,
+                    "default": "false"
+                },
+                {
+                    "name": "raw_data",
+                    "type": "boolean",
+                    "not_null": true,
+                    "default": "false"
+                },
+                {
                     "name": "proxy",
                     "type": "jsonb",
                     "not_null": true,
-                    "default": "{\"useApifyProxy\":true,\"apifyProxyGroups\":[\"RESIDENTIAL\"],\"apifyProxyCountry\":\"AZ\"}"
+                    "default": "{\"useApifyProxy\": true, \"apifyProxyGroups\": [\"RESIDENTIAL\"], \"apifyProxyCountry\": \"AZ\"}"
                 },
                 {
-                    "name": "user_agent",
+                    "name": "message_system_prompt",
                     "type": "text",
                     "not_null": true,
-                    "default": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+                    "default": "''"
+                },
+                {
+                    "name": "singleton",
+                    "type": "boolean",
+                    "not_null": true,
+                    "default": "true",
+                    "unique": true
                 },
                 {
                     "name": "created_at",
@@ -463,6 +639,184 @@ to authenticated using (true);
             ],
             "primary_key": [
                 "id"
+            ]
+        },
+        {
+            "schema": "public",
+            "name": "posts",
+            "columns": [
+                {
+                    "name": "id",
+                    "type": "bigint",
+                    "identity": "always",
+                    "not_null": true
+                },
+                {
+                    "name": "urn",
+                    "type": "text",
+                    "not_null": true,
+                    "unique": true
+                },
+                {
+                    "name": "name",
+                    "type": "text",
+                    "not_null": false
+                },
+                {
+                    "name": "occupation",
+                    "type": "text",
+                    "not_null": false
+                },
+                {
+                    "name": "headline",
+                    "type": "text",
+                    "not_null": false
+                },
+                {
+                    "name": "text",
+                    "type": "text",
+                    "not_null": true
+                },
+                {
+                    "name": "posted_at",
+                    "type": "timestamptz",
+                    "not_null": true
+                },
+                {
+                    "name": "industry_ids",
+                    "type": "ARRAY",
+                    "element_type_hint": "bigint",
+                    "not_null": true
+                },
+                {
+                    "name": "created_at",
+                    "type": "timestamptz",
+                    "default": "now()"
+                }
+            ],
+            "primary_key": [
+                "id"
+            ],
+            "indexes": [
+                "posts_urn_key (unique)",
+                "posts_posted_at_idx",
+                "posts_industry_ids_idx (gin)"
+            ]
+        },
+        {
+            "schema": "public",
+            "name": "messages",
+            "columns": [
+                {
+                    "name": "id",
+                    "type": "bigint",
+                    "identity": "always",
+                    "not_null": true
+                },
+                {
+                    "name": "industry_id",
+                    "type": "bigint",
+                    "not_null": true
+                },
+                {
+                    "name": "signal_id",
+                    "type": "bigint",
+                    "not_null": true
+                },
+                {
+                    "name": "message_text",
+                    "type": "text",
+                    "not_null": true
+                },
+                {
+                    "name": "created_at",
+                    "type": "timestamptz",
+                    "default": "now()"
+                }
+            ],
+            "primary_key": [
+                "id"
+            ],
+            "indexes": [
+                "messages_created_at_idx",
+                "messages_industry_signal_idx"
+            ]
+        },
+        {
+            "schema": "public",
+            "name": "pipeline_jobs",
+            "columns": [
+                {
+                    "name": "id",
+                    "type": "bigint",
+                    "identity": "always",
+                    "not_null": true
+                },
+                {
+                    "name": "status",
+                    "type": "text",
+                    "not_null": true,
+                    "default": "idle"
+                },
+                {
+                    "name": "apify_run_id",
+                    "type": "text",
+                    "not_null": false
+                },
+                {
+                    "name": "current_batch_offset",
+                    "type": "int4",
+                    "not_null": true,
+                    "default": "0"
+                },
+                {
+                    "name": "total_items",
+                    "type": "int4",
+                    "not_null": true,
+                    "default": "0"
+                },
+                {
+                    "name": "error_message",
+                    "type": "text",
+                    "not_null": false
+                },
+                {
+                    "name": "retry_count",
+                    "type": "int4",
+                    "not_null": true,
+                    "default": "0"
+                },
+                {
+                    "name": "max_retries",
+                    "type": "int4",
+                    "not_null": true,
+                    "default": "3"
+                },
+                {
+                    "name": "admin_chat_ids",
+                    "type": "ARRAY",
+                    "element_type_hint": "bigint",
+                    "not_null": true,
+                    "default": "{}"
+                },
+                {
+                    "name": "started_at",
+                    "type": "timestamptz",
+                    "default": "now()"
+                },
+                {
+                    "name": "updated_at",
+                    "type": "timestamptz",
+                    "default": "now()"
+                }
+            ],
+            "primary_key": [
+                "id"
+            ],
+            "notes": [
+                "Tracks daily pipeline state machine progress with batching support",
+                "Status values: 'idle', 'scraping', 'processing', 'vectorizing', 'generating', 'sending', 'completed', 'failed'",
+                "admin_chat_ids: Telegram chat IDs to notify on pipeline failure"
             ]
         },
         {
@@ -586,10 +940,73 @@ to authenticated using (true);
 }
 ```
 
-**Run/monitor flow**
+------
 
-- `refresh`/`refresh-one`: start APIFY run (`APIFY_ACTOR`), memory = `APIFY_MEMORY_MBYTES`.
-- On completion or dataset-read, each item is normalized and used to **update** the matching `linkedin.url` row.
+## AUTOMATED DAILY PIPELINE
+
+**Cloudflare Cron Schedule**: `*/5 * * * *` (every 5 minutes)
+
+**Orchestrator**: `/api/cron/advance`
+
+**State Machine Flow**:
+```
+idle → scraping → processing → vectorizing → generating → sending → completed
+  ↓        ↓           ↓            ↓            ↓           ↓
+failed ←---+----+------+------------+------------+-----------+
+```
+
+**Pipeline Stages**:
+
+1. **idle** (04:00 UTC trigger)
+   - Creates new pipeline_jobs row
+   - Transitions to: scraping
+
+2. **scraping** (async Apify)
+   - Starts Apify run (does not wait)
+   - Polls every 5 min until complete
+   - Batch size: N/A
+   - Transitions to: processing
+
+3. **processing** (batch: 10 posts)
+   - Verifies profiles (occupation/headline exact match)
+   - Deduplicates by URN
+   - Filters posts older than 24h
+   - Cleans text, inserts into posts table
+   - Transitions to: vectorizing
+
+4. **vectorizing** (batch: 10 posts)
+   - Deletes old Pinecone vectors (first batch only)
+   - Generates OpenAI embeddings (text-embedding-3-small, 1536 dims)
+   - Upserts to Pinecone namespace='default'
+   - Metadata: {industry_ids, text}
+   - Transitions to: generating
+
+5. **generating** (batch: 1 message)
+   - For each (industry, signal) pair:
+     - Generates embedding from signal.prompt
+     - Queries Pinecone with filter: industry_ids contains industry_id
+     - Reranks top 100 → top 10 with Cohere
+     - Calls GPT-5-mini to generate message
+     - Inserts into messages table
+   - Transitions to: sending
+
+6. **sending** (batch: 10 users)
+   - Fetches today's messages
+   - Filters messages by user's industry_ids AND signal_ids
+   - Sends via Telegram API (parse_mode: HTML)
+   - Transitions to: completed
+
+**Error Handling**:
+- Retry logic: max 3 retries per step
+- On failure: increments retry_count
+- If retry_count >= max_retries:
+  - Sets status='failed'
+  - Notifies admin_chat_ids via Telegram
+
+**Manual Trigger**:
+- Admin panel button "Run Daily Pipeline"
+- Calls `/api/scrape/verify-and-run` directly
+- Bypasses 04:00 UTC schedule
 
 ------
 

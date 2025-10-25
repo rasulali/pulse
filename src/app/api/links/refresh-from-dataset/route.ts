@@ -13,7 +13,6 @@ type ApifyItem = {
   inputUrl?: string;
   authorProfileUrl?: string;
   authorName?: string;
-  authorFullName?: string;
   authorHeadline?: string;
   author?: {
     occupation?: string;
@@ -49,8 +48,6 @@ const pickOcc = (x: ApifyItem) =>
   ).trim();
 
 const pickName = (x: ApifyItem) => {
-  const n = (x?.authorName || x?.authorFullName || "").trim();
-  if (n) return n;
   const fn = (x?.author?.firstName || "").trim();
   const ln = (x?.author?.lastName || "").trim();
   const a = [fn, ln].filter(Boolean).join(" ").trim();
