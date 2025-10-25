@@ -15,20 +15,34 @@
 - ✅ Environment variables documented
   - OpenAI SDK installed
   - Pinecone SDK installed
-  - Using Pinecone's native Cohere reranking (no separate API key needed)
 - ✅ Complete pipeline architecture designed
+- ✅ **All 7 pipeline endpoints implemented and tested**
+  - `/api/scrape/verify-and-run` - Start async Apify scraping
+  - `/api/scrape/check-apify` - Poll Apify run status
+  - `/api/scrape/process-posts` - Batch post processing (10 posts)
+  - `/api/scrape/vectorize` - Batch vectorization (10 posts)
+  - `/api/signals/generate` - Batch message generation (1 message)
+  - `/api/telegram/send-batch` - Batch Telegram delivery (10 users)
+  - `/api/cron/advance` - Orchestrator (state machine)
+- ✅ Admin panel "Run Pipeline" button
+- ✅ Pipeline status dashboard (auto-refresh every 10s)
+- ✅ Cloudflare cron configuration (`wrangler.jsonc`)
+- ✅ Text cleaning utility (`src/lib/text.ts`)
+- ✅ Local testing script (`run-pipeline.sh`)
+- ✅ **End-to-end pipeline tested successfully on localhost**
 
-### Pending Implementation
-- ⏳ `/api/scrape/verify-and-run` - Start async Apify scraping
-- ⏳ `/api/scrape/check-apify` - Poll Apify run status
-- ⏳ `/api/scrape/process-posts` - Batch post processing (10 posts)
-- ⏳ `/api/scrape/vectorize` - Batch vectorization (10 posts)
-- ⏳ `/api/signals/generate` - Batch message generation (1 message)
-- ⏳ `/api/telegram/send-batch` - Batch Telegram delivery (10 users)
-- ⏳ `/api/cron/advance` - Orchestrator (state machine)
-- ⏳ Admin panel "Run Pipeline" button
-- ⏳ Pipeline status dashboard
-- ⏳ Cloudflare cron configuration (`wrangler.jsonc`)
+### Known Issues & Fixes Applied
+- ✅ Fixed Supabase `.not("status", "in", "(completed,failed)")` syntax
+- ✅ Fixed Pinecone metadata: industry_ids must be array of strings, not numbers
+- ✅ Removed Pinecone rerank parameter (not supported in Node.js SDK v6)
+- ✅ Fixed Telegram webhook (removed telegram_start_token null assignment)
+- ✅ Added try-catch for Pinecone deleteAll (handles empty namespace)
+
+### Pending Tasks
+- ⏳ Deploy to Cloudflare Workers (production testing)
+- ⏳ Test Telegram message delivery in production
+- ⏳ Add Cohere reranking manually (if needed for better results)
+- ⏳ Monitor first automated cron run at 04:00 UTC
 
 ---
 

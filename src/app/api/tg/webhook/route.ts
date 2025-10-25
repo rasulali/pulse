@@ -41,10 +41,13 @@ export async function POST(req: Request) {
 
   const { error: updErr } = await sb
     .from("users")
-    .update({ telegram_chat_id: chatId, telegram_start_token: null })
+    .update({ telegram_chat_id: chatId })
     .eq("id", user.id);
 
-  if (updErr) return NextResponse.json({ ok: true });
+  if (updErr) {
+    console.error('[webhook] Failed to update telegram_chat_id:', updErr);
+    return NextResponse.json({ ok: true });
+  }
 
   await fetch(tg("sendMessage"), {
     method: "POST",

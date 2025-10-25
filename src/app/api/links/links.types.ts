@@ -3,6 +3,9 @@ export type ApifyItem = {
   authorProfileUrl?: string;
   authorHeadline?: string;
   isActivity?: boolean;
+  urn?: string;
+  text?: string;
+  postedAtTimestamp?: number;
   author?: {
     occupation?: string;
     publicId?: string;

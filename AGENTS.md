@@ -3,7 +3,7 @@
 **Purpose:** Canonical, LLM-friendly blueprint of Pulse AI's app, auth, DB, endpoints, and policies.
 **Rule:** Keep this file accurate. Update on any change to envs, schema, RLS, routes, or endpoints.
 
-**Current Status**: Planning phase complete. Database migrated. Pipeline endpoints designed but not yet implemented. See PLAN.md STATUS section for detailed checklist.
+**Current Status**: Pipeline fully implemented and tested end-to-end on localhost. All 7 endpoints operational. Ready for production deployment. See PLAN.md for known issues and fixes applied.
 
 ---
 
@@ -37,12 +37,10 @@
     "TELEGRAM_BOT_TOKEN": "<string>",
     "TELEGRAM_WEBHOOK_SECRET": "<string>",
     "APIFY_TOKEN": "<string>",
-    "APIFY_ACTOR": "curious_coder~linkedin-post-search-scraper",
     "APIFY_MEMORY_MBYTES": "8192",
     "OPENAI_API_KEY": "<string>",
     "PINECONE_API_KEY": "<string>",
-    "PINECONE_INDEX_NAME": "pulse-linkedin",
-    "COHERE_API_KEY": "NOT_NEEDED (uses Pinecone's native Cohere integration)"
+    "PINECONE_INDEX_NAME": "pulse-linkedin"
   },
   "notes": [
     "Public keys are client-exposed; server_only keys must never be exposed.",
@@ -51,7 +49,8 @@
     "APIFY_MEMORY_MBYTES=8192 configures 8GB without optional add-ons.",
     "OPENAI_API_KEY used for embeddings (text-embedding-3-small) and message generation (gpt-5-mini).",
     "PINECONE_API_KEY and PINECONE_INDEX_NAME for vector storage (1536 dims, single namespace).",
-    "Pinecone's native Cohere reranking is used (no separate COHERE_API_KEY required)."
+    "CRITICAL: Pinecone metadata arrays must be strings, not numbers. industry_ids stored as string[] via .map(String).",
+    "Rerank feature removed: Node.js SDK v6 doesn't support it. Using semantic search with topK=10."
   ]
 }
 ```
@@ -318,7 +317,8 @@
             "Fetch signals WHERE visible=true",
             "Calculate pair at batch_offset: industryIdx = floor(offset/signals.length), signalIdx = offset%signals.length",
             "Generate embedding from signal.prompt",
-            "Query Pinecone: vector=embedding, topK=10, filter={industry_ids: {$in: [industry.id]}}, rerankQuery=signal.prompt",
+            "Query Pinecone: vector=embedding, topK=10, filter={industry_ids: {$in: [String(industry.id)]}}",
+            "NOTE: industry.id converted to string for Pinecone metadata compatibility",
             "Format context from results",
             "Call GPT-5-mini with systemPrompt + userMessage",
             "Insert message into messages table",
@@ -949,6 +949,7 @@ to authenticated using (true);
 **Orchestrator**: `/api/cron/advance`
 
 **State Machine Flow**:
+
 ```
 idle → scraping → processing → vectorizing → generating → sending → completed
   ↓        ↓           ↓            ↓            ↓           ↓
@@ -978,16 +979,18 @@ failed ←---+----+------+------------+------------+-----------+
    - Deletes old Pinecone vectors (first batch only)
    - Generates OpenAI embeddings (text-embedding-3-small, 1536 dims)
    - Upserts to Pinecone namespace='default'
-   - Metadata: {industry_ids, text}
+   - Metadata: {industry_ids: string[], text: string}
+   - CRITICAL: industry_ids converted to strings via .map(String)
    - Transitions to: generating
 
 5. **generating** (batch: 1 message)
    - For each (industry, signal) pair:
      - Generates embedding from signal.prompt
-     - Queries Pinecone with filter: industry_ids contains industry_id
-     - Reranks top 100 → top 10 with Cohere
-     - Calls GPT-5-mini to generate message
+     - Queries Pinecone with semantic search (topK=10)
+     - Filter: industry_ids contains String(industry_id)
+     - Calls GPT-5-mini to generate message with retrieved context
      - Inserts into messages table
+   - NOTE: Rerank removed (Node.js SDK v6 doesn't support it)
    - Transitions to: sending
 
 6. **sending** (batch: 10 users)
@@ -997,6 +1000,7 @@ failed ←---+----+------+------------+------------+-----------+
    - Transitions to: completed
 
 **Error Handling**:
+
 - Retry logic: max 3 retries per step
 - On failure: increments retry_count
 - If retry_count >= max_retries:
@@ -1004,9 +1008,39 @@ failed ←---+----+------+------------+------------+-----------+
   - Notifies admin_chat_ids via Telegram
 
 **Manual Trigger**:
+
 - Admin panel button "Run Daily Pipeline"
 - Calls `/api/scrape/verify-and-run` directly
 - Bypasses 04:00 UTC schedule
+
+**Testing Script**:
+
+- `run-pipeline.sh` - Interactive localhost testing
+- Displays SQL reset command and copies to clipboard
+- Loops calling `/api/cron/advance` every 2 seconds
+- Shows colored output with status and progress
+
+**Known Issues & Fixes Applied**:
+
+1. **Pinecone metadata type error** (CRITICAL)
+   - Issue: Pinecone only supports string[], not number[] in metadata
+   - Fix: Convert industry_ids to strings: `(post.industry_ids || []).map(String)`
+   - Applied in: vectorize/route.ts and signals/generate/route.ts
+
+2. **Pinecone rerank not supported**
+   - Issue: Node.js SDK v6 doesn't support rerank parameter
+   - Fix: Removed rerank, using semantic search with topK=10
+   - Applied in: signals/generate/route.ts
+
+3. **Telegram webhook registration**
+   - Issue: Setting telegram_start_token=null failed (NOT NULL column)
+   - Fix: Removed null assignment, only update telegram_chat_id
+   - Applied in: tg/webhook/route.ts
+
+4. **Supabase .not() query syntax**
+   - Issue: `.not("status", "in", ["completed", "failed"])` threw PGRST100 error
+   - Fix: Changed to `.not("status", "in", "(completed,failed)")`
+   - Applied in: page.tsx and cron/advance/route.ts
 
 ------
 
@@ -1153,6 +1187,16 @@ CREATE TABLE public.users (
     "src/app/layout.tsx",
     "src/app/globals.css"
   ],
+  "pipeline": [
+    "src/app/api/scrape/verify-and-run/route.ts",
+    "src/app/api/scrape/check-apify/route.ts",
+    "src/app/api/scrape/process-posts/route.ts",
+    "src/app/api/scrape/vectorize/route.ts",
+    "src/app/api/signals/generate/route.ts",
+    "src/app/api/telegram/send-batch/route.ts",
+    "src/app/api/cron/advance/route.ts",
+    "src/lib/text.ts"
+  ],
   "config": [
     "open-next.config.ts",
     "next.config.ts",
@@ -1161,8 +1205,11 @@ CREATE TABLE public.users (
     "cloudflare-env.d.ts",
     "postcss.config.mjs"
   ],
+  "scripts": [
+    "run-pipeline.sh"
+  ],
   "public": ["public/_headers"],
-  "docs": ["AGENTS.md"]
+  "docs": ["AGENTS.md", "PLAN.md"]
 }
 ```
 

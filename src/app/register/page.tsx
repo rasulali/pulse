@@ -182,7 +182,7 @@ export default function RegisterPage() {
     <main className="min-h-screen w-full flex items-center justify-center">
       <Toast type={toast.type} text={toast.text} visible={toast.visible} />
 
-      <div className="w-full max-w-lg p-6">
+      <div className="w-full max-w-xl p-6">
         <header className="mb-6 text-center">
           <h2 className="text-3xl font-bold text-black">Welcome to Pulse AI</h2>
           <p className="text-gray-500 mt-2 text-sm">

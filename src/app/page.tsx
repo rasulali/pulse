@@ -65,6 +65,9 @@ export default function Page() {
   const [industrySearch, setIndustrySearch] = useState("");
   const [selectedIndustryIds, setSelectedIndustryIds] = useState<number[]>([]);
 
+  const [pipelineJob, setPipelineJob] = useState<any>(null);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -105,10 +108,36 @@ export default function Page() {
     setR(((B as Row[]) || []).map((x) => ({ ...x, allowed: false })));
   };
 
+  const loadPipelineStatus = async () => {
+    const { data } = await supabase
+      .from("pipeline_jobs")
+      .select("*")
+      .not("status", "in", "(completed,failed)")
+      .order("id", { ascending: false })
+      .limit(1);
+    setPipelineJob(data?.[0] || null);
+  };
+
+  const runPipeline = async () => {
+    setPipelineLoading(true);
+    try {
+      await fetch("/api/scrape/verify-and-run", { method: "POST" });
+      await loadPipelineStatus();
+    } catch (error) {
+      console.error("Failed to start pipeline:", error);
+    } finally {
+      setPipelineLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!user) return;
     loadIndustries();
     loadLists();
+    loadPipelineStatus();
+
+    const interval = setInterval(loadPipelineStatus, 10000);
+    return () => clearInterval(interval);
   }, [user]);
 
   const nameOf = (id: number) =>
@@ -334,6 +363,17 @@ export default function Page() {
             <span>{tableFrozen ? "Cancel" : "Refresh All"}</span>
           </button>
 
+          <button
+            disabled={pipelineLoading || !!pipelineJob}
+            onClick={runPipeline}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <FiSend
+              className={`w-4 h-4 ${pipelineLoading ? "animate-spin" : ""}`}
+            />
+            <span>Run Pipeline</span>
+          </button>
+
           <div className="flex-1 flex gap-2">
             <input
               type="url"
@@ -480,6 +520,80 @@ export default function Page() {
         </div>
       </section>
 
+      {pipelineJob && (
+        <section className="mx-auto max-w-[1600px] px-6 py-4 border-b border-neutral-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+          <div className="bg-white rounded-lg border border-blue-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-neutral-900 uppercase tracking-wide">
+                Pipeline Status
+              </h3>
+              <span
+                className={`px-3 py-1 text-xs font-medium rounded-full ${
+                  pipelineJob.status === "scraping"
+                    ? "bg-blue-100 text-blue-700"
+                    : pipelineJob.status === "processing"
+                      ? "bg-purple-100 text-purple-700"
+                      : pipelineJob.status === "vectorizing"
+                        ? "bg-yellow-100 text-yellow-700"
+                        : pipelineJob.status === "generating"
+                          ? "bg-green-100 text-green-700"
+                          : pipelineJob.status === "sending"
+                            ? "bg-indigo-100 text-indigo-700"
+                            : "bg-gray-100 text-gray-700"
+                }`}
+              >
+                {pipelineJob.status.toUpperCase()}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-neutral-600">Progress:</span>
+                <span className="font-medium text-neutral-900">
+                  {pipelineJob.current_batch_offset} / {pipelineJob.total_items}
+                </span>
+              </div>
+
+              {pipelineJob.total_items > 0 && (
+                <div className="w-full bg-neutral-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.min(100, (pipelineJob.current_batch_offset / pipelineJob.total_items) * 100)}%`,
+                    }}
+                  />
+                </div>
+              )}
+
+              {pipelineJob.error_message && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                  <FiAlertTriangle className="w-4 h-4 text-red-600 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-red-900">Error</p>
+                    <p className="text-xs text-red-700 mt-1">
+                      {pipelineJob.error_message}
+                    </p>
+                    <p className="text-xs text-red-600 mt-1">
+                      Retry {pipelineJob.retry_count} /{" "}
+                      {pipelineJob.max_retries}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-4 text-xs text-neutral-500 pt-2 border-t border-neutral-200">
+                <span>
+                  Started: {new Date(pipelineJob.started_at).toLocaleString()}
+                </span>
+                <span>
+                  Updated: {new Date(pipelineJob.updated_at).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {confirmOpen && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
           <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-md w-full p-6">
@@ -497,12 +611,7 @@ export default function Page() {
                 Cancel
               </button>
               <button
-                onClick={() =>
-                  runRefresh({
-                    datasetUrl:
-                      "https://api.apify.com/v2/datasets/WEwfHpbas3p2UbgQJ/items",
-                  })
-                }
+                onClick={() => runRefresh()}
                 className="px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
               >
                 Confirm
