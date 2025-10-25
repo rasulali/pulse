@@ -38,6 +38,19 @@ async function notifyAdmins(job: any, errorMessage: string) {
 }
 
 export async function POST(req: Request) {
+  const authHeader = req.headers.get('authorization');
+  const expectedToken = process.env.CRON_SECRET;
+
+  if (!expectedToken) {
+    console.error('[advance] CRON_SECRET not configured');
+    return NextResponse.json({ ok: false, error: 'Server misconfigured' }, { status: 500 });
+  }
+
+  if (authHeader !== `Bearer ${expectedToken}`) {
+    console.error('[advance] Unauthorized request');
+    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
   console.log('[advance] Cron advance started');
 
   const supa = sadmin();
@@ -71,6 +84,20 @@ export async function POST(req: Request) {
         .single();
 
       job = newJob;
+
+      if (newJob) {
+        console.log('[advance] New job created, triggering immediate processing');
+        const url = new URL(req.url);
+        const baseUrl = `${url.protocol}//${url.host}`;
+        fetch(`${baseUrl}/api/cron/advance`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'authorization': req.headers.get('authorization') || '',
+          },
+        }).catch(err => console.error('[advance] Self-trigger failed:', err));
+        return NextResponse.json({ ok: true, message: 'New job created and started' });
+      }
     } else {
       console.log('[advance] Not time to create new job (waiting for 04:00 UTC)');
       return NextResponse.json({ ok: true, message: 'No active job, waiting for 04:00 UTC' });
@@ -180,6 +207,22 @@ export async function POST(req: Request) {
     const progress = `${updatedJob?.current_batch_offset || 0}/${updatedJob?.total_items || 0}`;
 
     console.log(`[advance] Job updated. Status: ${updatedJob?.status}, Progress: ${progress}`);
+
+    const shouldContinue =
+      (updatedJob?.status && updatedJob.status !== job.status && updatedJob.status !== 'completed' && updatedJob.status !== 'failed') ||
+      (updatedJob?.status === job.status && ['processing', 'vectorizing', 'sending'].includes(updatedJob.status) &&
+       updatedJob.current_batch_offset < updatedJob.total_items);
+
+    if (shouldContinue) {
+      console.log(`[advance] Triggering immediate next check`);
+      fetch(`${baseUrl}/api/cron/advance`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': req.headers.get('authorization') || '',
+        },
+      }).catch(err => console.error('[advance] Self-trigger failed:', err));
+    }
 
     return NextResponse.json({
       ok: true,
