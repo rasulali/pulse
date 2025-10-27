@@ -17,7 +17,14 @@ import {
   FiSearch,
   FiCheckSquare,
   FiSquare,
+  FiEdit2,
+  FiEye,
+  FiEyeOff,
+  FiSettings,
+  FiUsers,
+  FiX,
 } from "react-icons/fi";
+import { IoToggle } from "react-icons/io5";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,7 +41,24 @@ type Row = {
   allowed?: boolean;
 };
 
-type Industry = { id: number; name: string };
+type Industry = { id: number; name: string; visible?: boolean };
+type Signal = {
+  id: number;
+  name: string;
+  visible: boolean;
+  prompt: string;
+  embedding_query: string;
+};
+type AppUser = {
+  id: number;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  telegram_chat_id: number | null;
+  is_admin?: boolean;
+  created_at: string;
+};
+type ConfigData = { id: number; limit_per_source: number; cookie_default: any };
 
 const rx = /[A-Za-z\u00C0-\u024F\u0400-\u04FF]/u;
 const secondary = (o: string | null, h: string | null) => {
@@ -67,6 +91,22 @@ export default function Page() {
 
   const [pipelineJob, setPipelineJob] = useState<any>(null);
   const [pipelineLoading, setPipelineLoading] = useState(false);
+
+  const [industries, setIndustries] = useState<Industry[]>([]);
+  const [signals, setSignals] = useState<Signal[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [config, setConfig] = useState<ConfigData | null>(null);
+
+  const [industryModal, setIndustryModal] = useState<{
+    open: boolean;
+    mode: "create" | "edit";
+    data?: Industry;
+  }>({ open: false, mode: "create" });
+  const [signalModal, setSignalModal] = useState<{
+    open: boolean;
+    mode: "create" | "edit";
+    data?: Signal;
+  }>({ open: false, mode: "create" });
 
   useEffect(() => {
     let mounted = true;
@@ -118,6 +158,35 @@ export default function Page() {
     setPipelineJob(data?.[0] || null);
   };
 
+  const loadAdminIndustries = async () => {
+    const res = await fetch("/api/admin/industries");
+    const data = await res.json();
+    setIndustries(Array.isArray(data) ? data : []);
+    loadIndustries();
+  };
+
+  const loadAdminSignals = async () => {
+    const res = await fetch("/api/admin/signals");
+    const data = await res.json();
+    setSignals(Array.isArray(data) ? data : []);
+  };
+
+  const loadAdminUsers = async () => {
+    const res = await fetch("/api/admin/users");
+    const data = await res.json();
+    setUsers(Array.isArray(data) ? data : []);
+  };
+
+  const loadAdminConfig = async () => {
+    const res = await fetch("/api/admin/config");
+    const data = await res.json();
+    setConfig(
+      data && typeof data === "object" && "id" in data
+        ? (data as ConfigData)
+        : null,
+    );
+  };
+
   const runPipeline = async () => {
     setPipelineLoading(true);
     try {
@@ -130,15 +199,61 @@ export default function Page() {
     }
   };
 
+  const handleIndustry = async (action: string, data?: any) => {
+    await fetch("/api/admin/industries", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, ...data }),
+    });
+    await loadAdminIndustries();
+  };
+
+  const handleSignal = async (action: string, data?: any) => {
+    await fetch("/api/admin/signals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, ...data }),
+    });
+    await loadAdminSignals();
+  };
+
+  const handleUser = async (action: string, id: number) => {
+    await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, id }),
+    });
+    await loadAdminUsers();
+  };
+
+  const handleConfigUpdate = async (updates: Partial<ConfigData>) => {
+    await fetch("/api/admin/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    await loadAdminConfig();
+  };
+
   useEffect(() => {
     if (!user) return;
     loadIndustries();
     loadLists();
     loadPipelineStatus();
+    loadAdminIndustries();
+    loadAdminSignals();
+    loadAdminUsers();
+    loadAdminConfig();
 
     const interval = setInterval(loadPipelineStatus, 10000);
     return () => clearInterval(interval);
   }, [user]);
+
+  useEffect(() => {
+    if (industryOptions.length === 1 && selectedIndustryIds.length === 0) {
+      setSelectedIndustryIds([industryOptions[0].id]);
+    }
+  }, [industryOptions]);
 
   const nameOf = (id: number) =>
     industryOptions.find((x) => x.id === id)?.name || String(id);
@@ -339,7 +454,7 @@ export default function Page() {
                 await supabase.auth.signOut();
                 router.replace("/login");
               }}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700"
+              className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700"
             >
               <FiLogOut className="w-4 h-4" />
               <span>Logout</span>
@@ -355,7 +470,7 @@ export default function Page() {
             onClick={() =>
               tableFrozen ? cancelRefreshAll() : setConfirmOpen(true)
             }
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <FiRefreshCw
               className={`w-4 h-4 ${tableFrozen ? "animate-spin" : ""}`}
@@ -366,11 +481,9 @@ export default function Page() {
           <button
             disabled={pipelineLoading || !!pipelineJob}
             onClick={runPipeline}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <FiSend
-              className={`w-4 h-4 ${pipelineLoading ? "animate-spin" : ""}`}
-            />
+            <FiSend className="w-4 h-4" />
             <span>Run Pipeline</span>
           </button>
 
@@ -385,7 +498,7 @@ export default function Page() {
             <button
               disabled={busy || !singleUrl.trim() || !selectionValid}
               onClick={addSingle}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap text-neutral-700"
+              className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap text-neutral-700"
             >
               <FiPlus className="w-4 h-4" />
               <span>Add</span>
@@ -411,37 +524,43 @@ export default function Page() {
               <button
                 type="button"
                 onClick={() => setIndOpen((s) => !s)}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700"
+                className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700"
               >
                 <FiTag className="w-4 h-4" />
                 <span>{allVisibleSelected}</span>
               </button>
               {indOpen && (
                 <div className="absolute z-40 mt-2 w-80 bg-white border border-neutral-200 rounded-md shadow-lg p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FiSearch className="w-4 h-4 text-neutral-500" />
-                    <input
-                      value={industrySearch}
-                      onChange={(e) => setIndustrySearch(e.target.value)}
-                      placeholder="Search industries"
-                      className="flex-1 px-2 py-1 text-sm rounded border border-neutral-300 focus:outline-none"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={toggleAllFiltered}
-                    className="w-full flex items-center justify-between px-2 py-2 text-sm rounded hover:bg-neutral-50"
+                  {industryOptions.length > 1 && (
+                    <div className="flex items-center gap-2 mb-2">
+                      <FiSearch className="w-4 h-4 text-neutral-500" />
+                      <input
+                        value={industrySearch}
+                        onChange={(e) => setIndustrySearch(e.target.value)}
+                        placeholder="Search industries"
+                        className="flex-1 px-2 py-1 text-sm rounded border border-neutral-300 focus:outline-none"
+                      />
+                    </div>
+                  )}
+                  {industryOptions.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={toggleAllFiltered}
+                      className="cursor-pointer w-full flex items-center justify-between px-2 py-2 text-sm rounded hover:bg-neutral-50"
+                    >
+                      <span>Select all (filtered)</span>
+                      {allChecked ? (
+                        <FiCheckSquare className="w-4 h-4" />
+                      ) : someChecked ? (
+                        <div className="w-4 h-4 border border-neutral-400 bg-neutral-300" />
+                      ) : (
+                        <FiSquare className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+                  <div
+                    className={`max-h-56 overflow-auto space-y-1 ${industryOptions.length > 1 ? "mt-2" : ""}`}
                   >
-                    <span>Select all (filtered)</span>
-                    {allChecked ? (
-                      <FiCheckSquare className="w-4 h-4" />
-                    ) : someChecked ? (
-                      <div className="w-4 h-4 border border-neutral-400 bg-neutral-300" />
-                    ) : (
-                      <FiSquare className="w-4 h-4" />
-                    )}
-                  </button>
-                  <div className="max-h-56 overflow-auto mt-2 space-y-1">
                     {industryOptions.length === 0 && (
                       <div className="text-xs text-neutral-500 px-1 py-1.5">
                         No industries
@@ -483,14 +602,14 @@ export default function Page() {
                     <button
                       type="button"
                       onClick={() => setSelectedIndustryIds([])}
-                      className="px-3 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 text-neutral-700"
+                      className="cursor-pointer px-3 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 text-neutral-700"
                     >
                       Clear
                     </button>
                     <button
                       type="button"
                       onClick={() => setIndOpen(false)}
-                      className="px-3 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800"
+                      className="cursor-pointer px-3 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800"
                     >
                       Apply
                     </button>
@@ -502,7 +621,7 @@ export default function Page() {
             <button
               disabled={busy || !bulkFile || !selectionValid}
               onClick={addBulk}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <FiUpload className="w-4 h-4" />
               <span>Upload</span>
@@ -511,7 +630,7 @@ export default function Page() {
             <button
               disabled={busy || tableFrozen}
               onClick={() => deleteAll("all")}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+              className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
             >
               <FiTrash2 className="w-4 h-4" />
               <span>Delete Everything</span>
@@ -594,6 +713,476 @@ export default function Page() {
         </section>
       )}
 
+      <section className="mx-auto max-w-[1600px] px-6 py-4">
+        <div className="grid grid-cols-2 gap-6">
+          <div className="bg-white border border-neutral-200 rounded-lg p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-neutral-900 uppercase tracking-wide">
+                <FiUsers className="inline w-4 h-4 mr-1" />
+                Users ({users.length})
+              </h3>
+            </div>
+            <div className="overflow-auto" style={{ maxHeight: "600px" }}>
+              <table className="w-full">
+                <thead className="sticky top-0 bg-white border-b border-neutral-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-600 uppercase">
+                      Email
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-600 uppercase">
+                      Name
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-600 uppercase">
+                      Chat ID
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-neutral-600 uppercase w-[180px]">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {[...users]
+                    .sort((a, b) => (b.is_admin ? 1 : 0) - (a.is_admin ? 1 : 0))
+                    .map((u) => (
+                      <tr key={u.id} className="hover:bg-neutral-50">
+                        <td className="px-4 py-3 text-sm text-neutral-900">
+                          {u.email}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-neutral-600">
+                          {[u.first_name, u.last_name]
+                            .filter(Boolean)
+                            .join(" ") || "—"}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-neutral-600">
+                          {u.telegram_chat_id || "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            {u.telegram_chat_id && (
+                              <button
+                                onClick={() => handleUser("toggle-admin", u.id)}
+                                className={`flex gap-x-2 items-center cursor-pointer py-1.5 text-xs
+font-medium
+${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
+                              >
+                                {u.is_admin && "admin"}
+                                <IoToggle
+                                  className={`w-6 h-6 ${!u.is_admin && "rotate-180"}`}
+                                />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleUser("delete", u.id)}
+                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
+                            >
+                              <FiTrash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="bg-white border border-neutral-200 rounded-lg p-6">
+              <h3 className="text-sm font-semibold text-neutral-900 uppercase tracking-wide mb-4">
+                <FiSettings className="inline w-4 h-4 mr-1" />
+                Scraper Config
+              </h3>
+              {config && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-700 mb-1">
+                      Limit Per Source
+                    </label>
+                    <input
+                      type="number"
+                      value={config.limit_per_source}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          limit_per_source: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full px-3 py-2 text-sm rounded border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-700 mb-1">
+                      Cookie Default (JSON)
+                    </label>
+                    <textarea
+                      value={JSON.stringify(config.cookie_default, null, 2)}
+                      onChange={(e) => {
+                        try {
+                          const parsed = JSON.parse(e.target.value);
+                          setConfig({ ...config, cookie_default: parsed });
+                        } catch {}
+                      }}
+                      rows={4}
+                      className="w-full px-3 py-2 text-sm rounded border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900 font-mono"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleConfigUpdate(config)}
+                    className="cursor-pointer px-4 py-2 text-sm rounded bg-neutral-900 text-white hover:bg-neutral-800"
+                  >
+                    Save Config
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white border border-neutral-200 rounded-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-neutral-900 uppercase tracking-wide">
+                  Industries ({industries.length})
+                </h3>
+                <button
+                  onClick={() =>
+                    setIndustryModal({ open: true, mode: "create" })
+                  }
+                  className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded bg-neutral-900 text-white hover:bg-neutral-800"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  Add
+                </button>
+              </div>
+              <div className="overflow-auto" style={{ maxHeight: "300px" }}>
+                <table className="w-full">
+                  <thead className="sticky top-0 bg-white border-b border-neutral-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-neutral-600 uppercase">
+                        Name
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-neutral-600 uppercase w-[180px]">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {industries.map((ind) => (
+                      <tr key={ind.id} className="hover:bg-neutral-50">
+                        <td className="px-4 py-3 text-sm text-neutral-900">
+                          {ind.name}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() =>
+                                handleIndustry("toggle-visible", { id: ind.id })
+                              }
+                              className={`cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border transition-colors ${
+                                ind.visible
+                                  ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+                                  : "border-neutral-300 bg-neutral-50 text-neutral-500 hover:bg-neutral-100"
+                              }`}
+                            >
+                              {ind.visible ? (
+                                <FiEye className="w-3.5 h-3.5" />
+                              ) : (
+                                <FiEyeOff className="w-3.5 h-3.5" />
+                              )}
+                              {ind.visible ? "Visible" : "Hidden"}
+                            </button>
+                            <button
+                              onClick={() =>
+                                setIndustryModal({
+                                  open: true,
+                                  mode: "edit",
+                                  data: ind,
+                                })
+                              }
+                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
+                            >
+                              <FiEdit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() =>
+                                handleIndustry("delete", { id: ind.id })
+                              }
+                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
+                            >
+                              <FiTrash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white border border-neutral-200 rounded-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-neutral-900 uppercase tracking-wide">
+                  Signals ({signals.length})
+                </h3>
+                <button
+                  onClick={() => setSignalModal({ open: true, mode: "create" })}
+                  className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded bg-neutral-900 text-white hover:bg-neutral-800"
+                >
+                  <FiPlus className="w-4 h-4" />
+                  Add
+                </button>
+              </div>
+              <div className="overflow-auto" style={{ maxHeight: "300px" }}>
+                <table className="w-full">
+                  <thead className="sticky top-0 bg-white border-b border-neutral-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-neutral-600 uppercase">
+                        Name
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-neutral-600 uppercase w-[180px]">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {signals.map((sig) => (
+                      <tr key={sig.id} className="hover:bg-neutral-50">
+                        <td className="px-4 py-3 text-sm text-neutral-900">
+                          {sig.name}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() =>
+                                handleSignal("toggle-visible", { id: sig.id })
+                              }
+                              className={`cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border transition-colors ${
+                                sig.visible
+                                  ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+                                  : "border-neutral-300 bg-neutral-50 text-neutral-500 hover:bg-neutral-100"
+                              }`}
+                            >
+                              {sig.visible ? (
+                                <FiEye className="w-3.5 h-3.5" />
+                              ) : (
+                                <FiEyeOff className="w-3.5 h-3.5" />
+                              )}
+                              {sig.visible ? "Visible" : "Hidden"}
+                            </button>
+                            <button
+                              onClick={() =>
+                                setSignalModal({
+                                  open: true,
+                                  mode: "edit",
+                                  data: sig,
+                                })
+                              }
+                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
+                            >
+                              <FiEdit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() =>
+                                handleSignal("delete", { id: sig.id })
+                              }
+                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
+                            >
+                              <FiTrash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {industryModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-neutral-900">
+                {industryModal.mode === "create"
+                  ? "Add Industry"
+                  : "Edit Industry"}
+              </h2>
+              <button
+                onClick={() =>
+                  setIndustryModal({ open: false, mode: "create" })
+                }
+              >
+                <FiX className="cursor-pointer w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = e.target as HTMLFormElement;
+                const name = (
+                  form.elements.namedItem("name") as HTMLInputElement
+                ).value;
+                const visible = (
+                  form.elements.namedItem("visible") as HTMLInputElement
+                ).checked;
+                if (industryModal.mode === "create") {
+                  handleIndustry("create", { name, visible });
+                } else {
+                  handleIndustry("update", {
+                    id: industryModal.data?.id,
+                    name,
+                    visible,
+                  });
+                }
+                setIndustryModal({ open: false, mode: "create" });
+              }}
+            >
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700 mb-1">
+                    Name
+                  </label>
+                  <input
+                    name="name"
+                    type="text"
+                    defaultValue={industryModal.data?.name || ""}
+                    required
+                    className="w-full px-3 py-2 text-sm rounded border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  />
+                </div>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setIndustryModal({ open: false, mode: "create" })
+                    }
+                    className="cursor-pointer px-4 py-2 text-sm rounded border border-neutral-300 hover:bg-neutral-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="cursor-pointer px-4 py-2 text-sm rounded bg-neutral-900 text-white hover:bg-neutral-800"
+                  >
+                    {industryModal.mode === "create" ? "Create" : "Update"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {signalModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-neutral-900">
+                {signalModal.mode === "create" ? "Add Signal" : "Edit Signal"}
+              </h2>
+              <button
+                className="cursor-pointer"
+                onClick={() => setSignalModal({ open: false, mode: "create" })}
+              >
+                <FiX className="w-5 h-5 text-neutral-500" />
+              </button>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = e.target as HTMLFormElement;
+                const name = (
+                  form.elements.namedItem("name") as HTMLInputElement
+                ).value;
+                const visible = (
+                  form.elements.namedItem("visible") as HTMLInputElement
+                ).checked;
+                const prompt = (
+                  form.elements.namedItem("prompt") as HTMLTextAreaElement
+                ).value;
+                const embedding_query = (
+                  form.elements.namedItem(
+                    "embedding_query",
+                  ) as HTMLTextAreaElement
+                ).value;
+                if (signalModal.mode === "create") {
+                  handleSignal("create", {
+                    name,
+                    visible,
+                    prompt,
+                    embedding_query,
+                  });
+                } else {
+                  handleSignal("update", {
+                    id: signalModal.data?.id,
+                    name,
+                    visible,
+                    prompt,
+                    embedding_query,
+                  });
+                }
+                setSignalModal({ open: false, mode: "create" });
+              }}
+            >
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700 mb-1">
+                    Name
+                  </label>
+                  <input
+                    name="name"
+                    type="text"
+                    defaultValue={signalModal.data?.name || ""}
+                    required
+                    className="w-full px-3 py-2 text-sm rounded border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700 mb-1">
+                    System Prompt
+                  </label>
+                  <textarea
+                    name="prompt"
+                    defaultValue={signalModal.data?.prompt || ""}
+                    rows={6}
+                    className="w-full px-3 py-2 text-sm rounded border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-neutral-700 mb-1">
+                    Embedding Query
+                  </label>
+                  <textarea
+                    name="embedding_query"
+                    defaultValue={signalModal.data?.embedding_query || ""}
+                    rows={3}
+                    className="w-full px-3 py-2 text-sm rounded border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                  />
+                </div>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSignalModal({ open: false, mode: "create" })
+                    }
+                    className="cursor-pointer px-4 py-2 text-sm rounded border border-neutral-300 hover:bg-neutral-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="cursor-pointer px-4 py-2 text-sm rounded bg-neutral-900 text-white hover:bg-neutral-800"
+                  >
+                    {signalModal.mode === "create" ? "Create" : "Update"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {confirmOpen && (
         <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
           <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-md w-full p-6">
@@ -606,13 +1195,13 @@ export default function Page() {
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => setConfirmOpen(false)}
-                className="px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700"
+                className="cursor-pointer px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700"
               >
                 Cancel
               </button>
               <button
                 onClick={() => runRefresh()}
-                className="px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+                className="cursor-pointer px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
               >
                 Confirm
               </button>
@@ -639,7 +1228,7 @@ export default function Page() {
                   <button
                     disabled={tableFrozen || busy || L.length === 0}
                     onClick={() => deleteAll("allowed")}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                    className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
                   >
                     <FiTrash2 className="w-3.5 h-3.5" />
                     <span>Delete All</span>
@@ -715,7 +1304,7 @@ export default function Page() {
                                 <button
                                   disabled={tableFrozen || busy || isLoading}
                                   onClick={() => refreshOne(x.id)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                                  className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
                                 >
                                   <FiRefreshCw
                                     className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`}
@@ -724,14 +1313,14 @@ export default function Page() {
                                 <button
                                   disabled={tableFrozen || busy}
                                   onClick={() => toggleAllowed(x.id, false)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                                  className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
                                 >
                                   <FiChevronRight className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   disabled={tableFrozen || busy}
                                   onClick={() => deleteOne(x.id)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                                  className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
                                 >
                                   <FiTrash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -769,7 +1358,7 @@ export default function Page() {
                       filteredR.length === 0
                     }
                     onClick={allowAll}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <FiSend className="w-3.5 h-3.5" />
                     <span>Allow All</span>
@@ -782,7 +1371,7 @@ export default function Page() {
                       filteredR.length === 0
                     }
                     onClick={() => deleteAll("not-allowed")}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                    className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
                   >
                     <FiTrash2 className="w-3.5 h-3.5" />
                     <span>Delete All</span>
@@ -847,7 +1436,7 @@ export default function Page() {
                                 <button
                                   disabled={tableFrozen || busy || isLoading}
                                   onClick={() => refreshOne(x.id)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                                  className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
                                 >
                                   <FiRefreshCw
                                     className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`}
@@ -856,14 +1445,14 @@ export default function Page() {
                                 <button
                                   disabled={tableFrozen || busy}
                                   onClick={() => toggleAllowed(x.id, true)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                                  className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
                                 >
                                   <FiChevronLeft className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   disabled={tableFrozen || busy}
                                   onClick={() => deleteOne(x.id)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                                  className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
                                 >
                                   <FiTrash2 className="w-3.5 h-3.5" />
                                 </button>

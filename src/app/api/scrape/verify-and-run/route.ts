@@ -8,6 +8,45 @@ const sadmin = () =>
     { auth: { persistSession: false } },
   );
 
+async function notifyAdmins(supa: ReturnType<typeof sadmin>, errorMessage: string) {
+  const { data: adminUsers } = await supa
+    .from("users")
+    .select("telegram_chat_id")
+    .eq("is_admin", true)
+    .not("telegram_chat_id", "is", null);
+
+  const adminChatIds = (adminUsers || [])
+    .map((u: any) => u.telegram_chat_id)
+    .filter(Boolean);
+
+  if (adminChatIds.length === 0) {
+    console.log('[verify-and-run] No admin chat IDs configured');
+    return;
+  }
+
+  const message = `⚠️ Pipeline Start Failed\n\nError: ${errorMessage}`;
+
+  for (const chatId of adminChatIds) {
+    try {
+      await fetch(
+        `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: message,
+            parse_mode: 'HTML',
+          }),
+        }
+      );
+      console.log(`[verify-and-run] Notified admin ${chatId}`);
+    } catch (error) {
+      console.error(`[verify-and-run] Failed to notify admin ${chatId}:`, error);
+    }
+  }
+}
+
 export async function POST() {
   console.log("[verify-and-run] Starting async Apify scrape");
 
@@ -22,7 +61,9 @@ export async function POST() {
     .single();
 
   if (!cfg) {
-    console.error("[verify-and-run] Config not found");
+    const errorMsg = "Config not found";
+    console.error("[verify-and-run]", errorMsg);
+    await notifyAdmins(supa, errorMsg);
     return NextResponse.json(
       { ok: false, error: "Config not found" },
       { status: 500 },
@@ -37,7 +78,9 @@ export async function POST() {
   const urls = (rows || []).map((r: any) => r.url).filter(Boolean);
 
   if (!urls.length) {
-    console.log("[verify-and-run] No allowed URLs found");
+    const errorMsg = "No allowed URLs found";
+    console.log("[verify-and-run]", errorMsg);
+    await notifyAdmins(supa, errorMsg);
     return NextResponse.json(
       { ok: false, error: "No allowed URLs" },
       { status: 400 },
@@ -69,7 +112,9 @@ export async function POST() {
   );
 
   if (!res.ok) {
-    console.error("[verify-and-run] Apify API error:", res.status);
+    const errorMsg = `Apify API returned ${res.status}`;
+    console.error("[verify-and-run]", errorMsg);
+    await notifyAdmins(supa, errorMsg);
     return NextResponse.json(
       { ok: false, error: "Apify API error" },
       { status: 502 },
@@ -80,7 +125,9 @@ export async function POST() {
   const apifyRunId = runData.data?.id;
 
   if (!apifyRunId) {
-    console.error("[verify-and-run] No run ID returned from Apify");
+    const errorMsg = "No run ID returned from Apify";
+    console.error("[verify-and-run]", errorMsg);
+    await notifyAdmins(supa, errorMsg);
     return NextResponse.json(
       { ok: false, error: "No run ID" },
       { status: 502 },
@@ -89,11 +136,24 @@ export async function POST() {
 
   console.log(`[verify-and-run] Apify run started: ${apifyRunId}`);
 
+  const { data: adminUsers } = await supa
+    .from("users")
+    .select("telegram_chat_id")
+    .eq("is_admin", true)
+    .not("telegram_chat_id", "is", null);
+
+  const adminChatIds = (adminUsers || [])
+    .map((u: any) => u.telegram_chat_id)
+    .filter(Boolean);
+
+  console.log(`[verify-and-run] Found ${adminChatIds.length} admin chat IDs`);
+
   const { data: job, error } = await supa
     .from("pipeline_jobs")
     .insert({
       status: "scraping",
       apify_run_id: apifyRunId,
+      admin_chat_ids: adminChatIds,
       current_batch_offset: 0,
       total_items: 0,
       started_at: new Date().toISOString(),
@@ -103,7 +163,9 @@ export async function POST() {
     .single();
 
   if (error) {
-    console.error("[verify-and-run] Failed to create pipeline_jobs:", error);
+    const errorMsg = `Failed to create pipeline_jobs: ${error.message}`;
+    console.error("[verify-and-run]", errorMsg);
+    await notifyAdmins(supa, errorMsg);
     return NextResponse.json(
       { ok: false, error: "Database error" },
       { status: 500 },

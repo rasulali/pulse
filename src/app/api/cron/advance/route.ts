@@ -71,10 +71,23 @@ export async function POST(req: Request) {
     if (currentHour === 4) {
       console.log('[advance] Creating new pipeline job at 04:00 UTC');
 
+      const { data: adminUsers } = await supa
+        .from("users")
+        .select("telegram_chat_id")
+        .eq("is_admin", true)
+        .not("telegram_chat_id", "is", null);
+
+      const adminChatIds = (adminUsers || [])
+        .map((u: any) => u.telegram_chat_id)
+        .filter(Boolean);
+
+      console.log(`[advance] Found ${adminChatIds.length} admin chat IDs`);
+
       const { data: newJob } = await supa
         .from("pipeline_jobs")
         .insert({
           status: 'idle',
+          admin_chat_ids: adminChatIds,
           current_batch_offset: 0,
           total_items: 0,
           started_at: new Date().toISOString(),

@@ -3,7 +3,7 @@
 **Purpose:** Canonical, LLM-friendly blueprint of Pulse AI's app, auth, DB, endpoints, and policies.
 **Rule:** Keep this file accurate. Update on any change to envs, schema, RLS, routes, or endpoints.
 
-**Current Status**: Pipeline fully implemented and tested end-to-end on localhost. All 7 endpoints operational. Ready for production deployment. See PLAN.md for known issues and fixes applied.
+**Current Status**: Pipeline fully implemented and tested end-to-end on localhost. All 7 endpoints operational. Ready for production deployment.
 
 ---
 
@@ -312,15 +312,14 @@
             "batch_offset": "number"
         },
         "process": [
-            "Fetch config.message_system_prompt",
             "Fetch industries WHERE visible=true",
             "Fetch signals WHERE visible=true",
             "Calculate pair at batch_offset: industryIdx = floor(offset/signals.length), signalIdx = offset%signals.length",
-            "Generate embedding from signal.prompt",
+            "Generate embedding from signal.embedding_query",
             "Query Pinecone: vector=embedding, topK=10, filter={industry_ids: {$in: [String(industry.id)]}}",
             "NOTE: industry.id converted to string for Pinecone metadata compatibility",
             "Format context from results",
-            "Call GPT-5-mini with systemPrompt + userMessage",
+            "Call GPT-5-mini with signal.prompt as system prompt + userMessage",
             "Insert message into messages table",
             "Update pipeline_jobs: increment current_batch_offset",
             "If done (offset >= total_pairs): set status='sending', count users, reset offset"
@@ -329,6 +328,46 @@
             "ok": true,
             "generated": 1
         }
+    },
+    "/api/admin/industries": {
+        "method": "GET | POST",
+        "auth": "server-only",
+        "actions": {
+            "GET": "Fetch all industries",
+            "create": "Insert new industry with name & visible",
+            "update": "Update industry by id",
+            "delete": "Delete industry by id",
+            "toggle-visible": "Toggle visible field for industry"
+        }
+    },
+    "/api/admin/signals": {
+        "method": "GET | POST",
+        "auth": "server-only",
+        "actions": {
+            "GET": "Fetch all signals",
+            "create": "Insert new signal with name, visible, prompt, embedding_query",
+            "update": "Update signal by id",
+            "delete": "Delete signal by id",
+            "toggle-visible": "Toggle visible field for signal"
+        }
+    },
+    "/api/admin/users": {
+        "method": "GET | POST",
+        "auth": "server-only",
+        "actions": {
+            "GET": "Fetch all users with is_admin flag (from pipeline_jobs.admin_chat_ids)",
+            "delete": "Delete user by id",
+            "toggle-admin": "Add/remove user's telegram_chat_id from pipeline_jobs.admin_chat_ids"
+        }
+    },
+    "/api/admin/config": {
+        "method": "GET | POST",
+        "auth": "server-only",
+        "input": {
+            "limit_per_source": "number (optional)",
+            "cookie_default": "jsonb (optional)"
+        },
+        "effect": "Update config singleton; only provided fields are updated"
     },
     "/api/telegram/send-batch": {
         "method": "POST",
@@ -538,6 +577,13 @@ to authenticated using (true);
                     "default": "false"
                 },
                 {
+                    "name": "industry_ids",
+                    "type": "ARRAY",
+                    "element_type_hint": "bigint",
+                    "not_null": true,
+                    "default": "'{}'::bigint[]"
+                },
+                {
                     "name": "created_at",
                     "type": "timestamptz",
                     "default": "now()"
@@ -614,12 +660,6 @@ to authenticated using (true);
                     "default": "{\"useApifyProxy\": true, \"apifyProxyGroups\": [\"RESIDENTIAL\"], \"apifyProxyCountry\": \"AZ\"}"
                 },
                 {
-                    "name": "message_system_prompt",
-                    "type": "text",
-                    "not_null": true,
-                    "default": "''"
-                },
-                {
                     "name": "singleton",
                     "type": "boolean",
                     "not_null": true,
@@ -686,7 +726,8 @@ to authenticated using (true);
                     "name": "industry_ids",
                     "type": "ARRAY",
                     "element_type_hint": "bigint",
-                    "not_null": true
+                    "not_null": true,
+                    "default": "'{}'::bigint[]"
                 },
                 {
                     "name": "created_at",
@@ -740,6 +781,16 @@ to authenticated using (true);
             "indexes": [
                 "messages_created_at_idx",
                 "messages_industry_signal_idx"
+            ],
+            "foreign_keys": [
+                {
+                    "column": "industry_id",
+                    "references": "public.industries(id)"
+                },
+                {
+                    "column": "signal_id",
+                    "references": "public.signals(id)"
+                }
             ]
         },
         {
@@ -766,13 +817,13 @@ to authenticated using (true);
                 {
                     "name": "current_batch_offset",
                     "type": "int4",
-                    "not_null": true,
+                    "not_null": false,
                     "default": "0"
                 },
                 {
                     "name": "total_items",
                     "type": "int4",
-                    "not_null": true,
+                    "not_null": false,
                     "default": "0"
                 },
                 {
@@ -783,13 +834,13 @@ to authenticated using (true);
                 {
                     "name": "retry_count",
                     "type": "int4",
-                    "not_null": true,
+                    "not_null": false,
                     "default": "0"
                 },
                 {
                     "name": "max_retries",
                     "type": "int4",
-                    "not_null": true,
+                    "not_null": false,
                     "default": "3"
                 },
                 {
@@ -797,7 +848,7 @@ to authenticated using (true);
                     "type": "ARRAY",
                     "element_type_hint": "bigint",
                     "not_null": true,
-                    "default": "{}"
+                    "default": "'{}'::bigint[]"
                 },
                 {
                     "name": "started_at",
@@ -866,6 +917,12 @@ to authenticated using (true);
                 },
                 {
                     "name": "prompt",
+                    "type": "text",
+                    "not_null": true,
+                    "default": "''::text"
+                },
+                {
+                    "name": "embedding_query",
                     "type": "text",
                     "not_null": true,
                     "default": "''::text"
@@ -1114,6 +1171,25 @@ failed ←---+----+------+------------+------------+-----------+
       "cancel_supported": true,
       "dataset_mode_switch": "uses refresh-from-dataset when configured"
     }
+  },
+  "admin_config": {
+    "layout": "2-column grid: Users (left) | Config/Industries/Signals (right, stacked)",
+    "users": {
+      "columns": ["Email", "Name", "Chat ID", "Admin badge", "Actions"],
+      "actions": ["Toggle Admin (add/remove from pipeline_jobs.admin_chat_ids)", "Delete"]
+    },
+    "config": {
+      "fields": ["limit_per_source (number)", "cookie_default (JSON textarea)"],
+      "action": "Save Config button"
+    },
+    "industries": {
+      "columns": ["Name", "Visible toggle button (right-aligned, green when visible)", "Edit", "Delete"],
+      "action": "Add Industry button"
+    },
+    "signals": {
+      "columns": ["Name", "Visible toggle button (right-aligned, green when visible)", "Edit", "Delete"],
+      "action": "Add Signal button (modal with name, visible, prompt, embedding_query)"
+    }
   }
 }
 ```
@@ -1137,6 +1213,7 @@ CREATE TABLE public.signals (
   name text NOT NULL,
   visible boolean NOT NULL,
   prompt text NOT NULL DEFAULT ''::text,
+  embedding_query text NOT NULL DEFAULT ''::text,
   CONSTRAINT signals_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.users (
@@ -1197,6 +1274,12 @@ CREATE TABLE public.users (
     "src/app/api/cron/advance/route.ts",
     "src/lib/text.ts"
   ],
+  "admin": [
+    "src/app/api/admin/industries/route.ts",
+    "src/app/api/admin/signals/route.ts",
+    "src/app/api/admin/users/route.ts",
+    "src/app/api/admin/config/route.ts"
+  ],
   "config": [
     "open-next.config.ts",
     "next.config.ts",
@@ -1209,7 +1292,7 @@ CREATE TABLE public.users (
     "run-pipeline.sh"
   ],
   "public": ["public/_headers"],
-  "docs": ["AGENTS.md", "PLAN.md"]
+  "docs": ["AGENTS.md"]
 }
 ```
 
