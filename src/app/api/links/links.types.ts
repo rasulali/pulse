@@ -1,5 +1,6 @@
 export type ApifyItem = {
   inputUrl?: string;
+  url?: string;
   authorProfileUrl?: string;
   authorHeadline?: string;
   isActivity?: boolean;

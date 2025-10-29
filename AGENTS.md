@@ -37,7 +37,6 @@
     "TELEGRAM_BOT_TOKEN": "<string>",
     "TELEGRAM_WEBHOOK_SECRET": "<string>",
     "APIFY_TOKEN": "<string>",
-    "APIFY_MEMORY_MBYTES": "8192",
     "OPENAI_API_KEY": "<string>",
     "PINECONE_API_KEY": "<string>",
     "PINECONE_INDEX_NAME": "pulse-linkedin"
@@ -46,7 +45,7 @@
     "Public keys are client-exposed; server_only keys must never be exposed.",
     "Webhook compares 'x-telegram-bot-api-secret-token' to TELEGRAM_WEBHOOK_SECRET.",
     "APIFY_TOKEN is required for actor runs and dataset fetch.",
-    "APIFY_MEMORY_MBYTES=8192 configures 8GB without optional add-ons.",
+    "Apify memory allocation (MB) configured in config.memory_mbytes table field (default: 512).",
     "OPENAI_API_KEY used for embeddings (text-embedding-3-small) and message generation (gpt-5-mini).",
     "PINECONE_API_KEY and PINECONE_INDEX_NAME for vector storage (1536 dims, single namespace).",
     "CRITICAL: Pinecone metadata arrays must be strings, not numbers. industry_ids stored as string[] via .map(String).",
@@ -660,6 +659,13 @@ to authenticated using (true);
                     "default": "{\"useApifyProxy\": true, \"apifyProxyGroups\": [\"RESIDENTIAL\"], \"apifyProxyCountry\": \"AZ\"}"
                 },
                 {
+                    "name": "memory_mbytes",
+                    "type": "int4",
+                    "not_null": true,
+                    "default": "512",
+                    "description": "Memory allocation in MB for Apify actor runs"
+                },
+                {
                     "name": "singleton",
                     "type": "boolean",
                     "not_null": true,
@@ -728,6 +734,18 @@ to authenticated using (true);
                     "element_type_hint": "bigint",
                     "not_null": true,
                     "default": "'{}'::bigint[]"
+                },
+                {
+                    "name": "source_url",
+                    "type": "text",
+                    "not_null": false,
+                    "description": "URL of the LinkedIn post (original or repost)"
+                },
+                {
+                    "name": "author_url",
+                    "type": "text",
+                    "not_null": false,
+                    "description": "URL of the LinkedIn profile we scraped this post from"
                 },
                 {
                     "name": "created_at",
@@ -1036,17 +1054,19 @@ failed ←---+----+------+------------+------------+-----------+
    - Deletes old Pinecone vectors (first batch only)
    - Generates OpenAI embeddings (text-embedding-3-small, 1536 dims)
    - Upserts to Pinecone namespace='default'
-   - Metadata: {industry_ids: string[], text: string}
+   - Metadata: {industry_ids: string[], text: string, source_url: string, author_url: string, name: string}
    - CRITICAL: industry_ids converted to strings via .map(String)
    - Transitions to: generating
 
 5. **generating** (batch: 1 message)
    - For each (industry, signal) pair:
-     - Generates embedding from signal.prompt
+     - Generates embedding from signal.embedding_query
      - Queries Pinecone with semantic search (topK=10)
      - Filter: industry_ids contains String(industry_id)
-     - Calls GPT-5-mini to generate message with retrieved context
-     - Inserts into messages table
+     - Formats context with URLs: TEXT, AUTHOR, AUTHOR_URL, SOURCE_URL per post
+     - Calls GPT-5-mini to generate message with structured context
+     - GPT output includes: clickable author names, "Sources:" section with post links
+     - Inserts HTML-formatted message into messages table
    - NOTE: Rerank removed (Node.js SDK v6 doesn't support it)
    - Transitions to: sending
 
@@ -1089,12 +1109,20 @@ failed ←---+----+------+------------+------------+-----------+
    - Fix: Removed rerank, using semantic search with topK=10
    - Applied in: signals/generate/route.ts
 
-3. **Telegram webhook registration**
+3. **Source Attribution in Messages**
+   - Feature: Messages now include clickable source links
+   - Posts table stores source_url (post link) and author_url (profile link)
+   - For reposts: author_url = reposter's profile (inputUrl), source_url = repost link
+   - Pinecone metadata includes: text, industry_ids, source_url, author_url, name
+   - GPT receives structured context with URLs and generates HTML links
+   - Message format: author names as <a> links, "Sources:" section at bottom
+
+4. **Telegram webhook registration**
    - Issue: Setting telegram_start_token=null failed (NOT NULL column)
    - Fix: Removed null assignment, only update telegram_chat_id
    - Applied in: tg/webhook/route.ts
 
-4. **Supabase .not() query syntax**
+5. **Supabase .not() query syntax**
    - Issue: `.not("status", "in", ["completed", "failed"])` threw PGRST100 error
    - Fix: Changed to `.not("status", "in", "(completed,failed)")`
    - Applied in: page.tsx and cron/advance/route.ts
@@ -1179,7 +1207,7 @@ failed ←---+----+------+------------+------------+-----------+
       "actions": ["Toggle Admin (add/remove from pipeline_jobs.admin_chat_ids)", "Delete"]
     },
     "config": {
-      "fields": ["limit_per_source (number)", "cookie_default (JSON textarea)"],
+      "fields": ["limit_per_source (number)", "memory_mbytes (number)", "cookie_default (JSON textarea)"],
       "action": "Save Config button"
     },
     "industries": {

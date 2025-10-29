@@ -44,13 +44,23 @@ export async function POST(req: Request) {
     );
   }
 
-  const systemPrompt = `You are an AI assistant that analyzes professional business content and generates concise insights.
+  const systemPrompt = `You are an AI assistant that analyzes professional business content and generates concise insights with source attribution.
 
-CONTEXT
-The CONTEXT is plain text with multiple excerpts from business posts, corporate statements, leadership messages, industry updates, or news-style summaries. Excerpts are separated by blank lines.
+CONTEXT FORMAT
+The CONTEXT contains multiple numbered excerpts. Each excerpt is structured as:
+---
+[N]
+TEXT: [post content]
+AUTHOR: [name]
+AUTHOR_TITLE: [occupation or headline]
+AUTHOR_URL: [LinkedIn profile URL]
+SOURCE_URL: [LinkedIn post URL]
+---
+
+Where [N] is the source number (1, 2, 3, etc.) that you will use for citations.
 
 CORE BEHAVIOR
-1) Extract only concrete business-relevant intelligence: events, strategy shifts, risks, growth signals, opportunities.
+1) Extract only concrete business-relevant intelligence that matches the QUERY signal type.
 2) If multiple excerpts describe the same topic, merge them into one insight instead of repeating.
 3) Include specific factual details only if explicitly mentioned (dates, companies, geography, metrics, outcomes).
 4) Never invent, infer, guess, speculate, or "soft suggest" anything that is not explicitly present in the CONTEXT.
@@ -59,7 +69,7 @@ CORE BEHAVIOR
 CRITICAL FILTERING RULE
 Before you generate any output, you MUST decide if the CONTEXT actually contains information that matches the requested signal type.
 
-- If (and only if) there is at least one clearly relevant, explicitly stated detail in the CONTEXT that matches the requested signal (examples: event info for an Events signal; partnership news for a Partnerships signal; investment/expansion info for an Expansion signal), then you should generate a normal formatted message (see FORMAT below).
+- If (and only if) there is at least one clearly relevant, explicitly stated detail in the CONTEXT that matches the QUERY signal, then you should generate a formatted message following the QUERY's structure instructions.
 
 - If there is NO relevant information in the CONTEXT for this signal, you MUST respond with exactly:
 NO_CONTENT
@@ -69,40 +79,35 @@ NO_CONTENT
 - NEVER fabricate, generalize, or summarize unrelated content just to produce an answer.
 - NEVER output any explanation, apology, filler, disclaimers, or alternative summary when returning NO_CONTENT. Only output NO_CONTENT.
 
-FORMAT (Telegram)
-If you *do* find relevant content and you are NOT returning NO_CONTENT, follow this output format:
+FORMAT (Telegram with HTML)
+If you *do* find relevant content and you are NOT returning NO_CONTENT:
 
-- Use <b>...</b> for key findings and section headers.
+- Use <b>...</b> for headers, titles, and key findings.
 - Use <i>...</i> for clearly stated or clearly implied impact (opportunity, risk, strategic significance).
 - Use "- " for bullet points and normal line breaks to separate items.
-- Do NOT use Markdown, tables, or links.
-- Keep messages short and easy to consume; prefer a brief intro plus 3–6 focused bullets.
+- Use <a href="AUTHOR_URL">AUTHOR_NAME</a> for clickable author names (use full name from AUTHOR field).
+- Use source numbers [N] from the context for citations (e.g., "Source 1", "Source 2").
+- Do NOT use Markdown or tables.
+- Keep messages short and easy to consume.
 - Stay under 4096 characters.
 
-STRUCTURE (Non-NO_CONTENT case)
-1. Start with a header line using <b>...</b> that summarizes the main theme (ex: <b>Partnership / JV activity</b> or <b>Upcoming industry events</b>).
-2. Then provide 3–6 bullet points using "- ".
-   Each bullet should include:
-   - What happened (only if explicitly stated in CONTEXT)
-   - Who is involved (company, ministry, delegation, etc.)
-   - When / where (date, country, venue) IF explicitly provided
-   - The business relevance in <i>...</i> at the end
+SOURCE ATTRIBUTION
+- Each excerpt in CONTEXT has a number [N] at the start.
+- When referencing information, note which source(s) it came from.
+- At the end of your message, always include a <b>Sources:</b> section:
+  <b>Sources:</b>
+  <a href="SOURCE_URL_1">Source 1</a>, <a href="SOURCE_URL_2">Source 2</a>, ...
+- List only the sources you actually used in your message.
+- Use the same numbers [N] from the CONTEXT.
 
-RULES FOR EVENTS SIGNALS
-When the current signal is about professional gatherings (conferences, forums, summits, exhibitions, trade shows, roundtables, workshops, client demos, product showcases), extract only those.
-For each event bullet (max ~5), include when available:
-- Event: name or description
-- Date / Location
-- Key participants / delegations
-- Purpose (partnership talks, regulatory discussion, product launch, etc.)
-- Strategic note if the text clearly states why it matters
-
-If no such professional gathering is present in CONTEXT, you MUST return NO_CONTENT.
+STRUCTURE
+Follow the specific structure and requirements provided in the QUERY. The QUERY will tell you exactly what to extract and how to format it.
 
 FINAL REMINDERS
 - NEVER invent or guess missing details (dates, locations, participants, motives).
-- NEVER output generic filler like "no events were mentioned..." unless that information is literally in the CONTEXT.
-- If there is nothing relevant, output ONLY: NO_CONTENT
+- ALWAYS include source attribution with numbered links.
+- Use author names as clickable HTML links: <a href="AUTHOR_URL">AUTHOR_NAME</a>
+- If there is nothing relevant to the QUERY signal, output ONLY: NO_CONTENT
 `;
 
   const { data: industries } = await supa
@@ -232,15 +237,26 @@ FINAL REMINDERS
   }
 
   console.log(
-    `[generate] Found ${queryRes.matches.length} posts after reranking`,
+    `[generate] Found ${queryRes.matches.length} posts after semantic search`,
   );
 
   const context = queryRes.matches
-    .map((m: any) => (m.metadata as any)?.text)
+    .map((m: any, index: number) => {
+      const meta = m.metadata as any;
+      if (!meta?.text) return null;
+      return `---
+[${index + 1}]
+TEXT: ${meta.text}
+AUTHOR: ${meta.name || "Unknown"}
+AUTHOR_TITLE: ${meta.title || ""}
+AUTHOR_URL: ${meta.author_url || ""}
+SOURCE_URL: ${meta.source_url || ""}
+---`;
+    })
     .filter(Boolean)
     .join("\n\n");
 
-  const userMessage = `CONTEXT: ${context}\n\nQUERY: ${signal.prompt}`;
+  const userMessage = `CONTEXT:\n${context}\n\nQUERY: ${signal.prompt}`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-5-mini",

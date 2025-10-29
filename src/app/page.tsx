@@ -58,7 +58,12 @@ type AppUser = {
   is_admin?: boolean;
   created_at: string;
 };
-type ConfigData = { id: number; limit_per_source: number; cookie_default: any };
+type ConfigData = {
+  id: number;
+  limit_per_source: number;
+  memory_mbytes: number;
+  cookie_default: any;
+};
 
 const rx = /[A-Za-z\u00C0-\u024F\u0400-\u04FF]/u;
 const secondary = (o: string | null, h: string | null) => {
@@ -202,11 +207,11 @@ export default function Page() {
   const loadAdminConfig = async () => {
     const res = await fetch("/api/admin/config");
     const data = await res.json();
-    setConfig(
+    const configData =
       data && typeof data === "object" && "id" in data
         ? (data as ConfigData)
-        : null,
-    );
+        : null;
+    setConfig(configData);
   };
 
   const runPipeline = async () => {
@@ -865,6 +870,22 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                         setConfig({
                           ...config,
                           limit_per_source: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full px-3 py-2 text-sm rounded border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-700 mb-1">
+                      Memory (MB)
+                    </label>
+                    <input
+                      type="number"
+                      value={config.memory_mbytes}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          memory_mbytes: parseInt(e.target.value),
                         })
                       }
                       className="w-full px-3 py-2 text-sm rounded border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-neutral-900"

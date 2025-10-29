@@ -7,7 +7,7 @@ const sadmin = () =>
   createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SECRET_KEY!,
-    { auth: { persistSession: false } }
+    { auth: { persistSession: false } },
   );
 
 const openai = new OpenAI({
@@ -19,9 +19,9 @@ const pinecone = new Pinecone({
 });
 
 export async function POST(req: Request) {
-  console.log('[vectorize] Starting batch vectorization');
+  console.log("[vectorize] Starting batch vectorization");
 
-  const body = await req.json() as any;
+  const body = (await req.json()) as any;
   const batchOffset = body.batch_offset || 0;
   const batchSize = body.batch_size || 10;
 
@@ -38,19 +38,25 @@ export async function POST(req: Request) {
     .single();
 
   if (!job) {
-    console.error('[vectorize] No vectorizing job found');
-    return NextResponse.json({ ok: false, error: 'No vectorizing job' }, { status: 404 });
+    console.error("[vectorize] No vectorizing job found");
+    return NextResponse.json(
+      { ok: false, error: "No vectorizing job" },
+      { status: 404 },
+    );
   }
 
   const index = pinecone.index(process.env.PINECONE_INDEX_NAME!);
 
   if (batchOffset === 0) {
-    console.log('[vectorize] First batch - deleting all existing vectors');
+    console.log("[vectorize] First batch - deleting all existing vectors");
     try {
-      await index.namespace('default').deleteAll();
-      console.log('[vectorize] Vectors deleted');
+      await index.namespace("default").deleteAll();
+      console.log("[vectorize] Vectors deleted");
     } catch (error) {
-      console.log('[vectorize] No vectors to delete (namespace might be empty):', error);
+      console.log(
+        "[vectorize] No vectors to delete (namespace might be empty):",
+        error,
+      );
     }
   }
 
@@ -64,22 +70,24 @@ export async function POST(req: Request) {
     .range(batchOffset, batchOffset + batchSize - 1);
 
   if (!posts || posts.length === 0) {
-    console.log('[vectorize] No posts to vectorize in this batch');
+    console.log("[vectorize] No posts to vectorize in this batch");
 
     const { data: totalCount } = await supa
       .from("posts")
-      .select("id", { count: 'exact', head: true })
+      .select("id", { count: "exact", head: true })
       .gte("created_at", oneDayAgo);
 
     const newOffset = batchOffset + batchSize;
     const isDone = newOffset >= (totalCount as any)?.count || 0;
 
     if (isDone) {
-      console.log('[vectorize] All posts vectorized, transitioning to generating');
+      console.log(
+        "[vectorize] All posts vectorized, transitioning to generating",
+      );
       await supa
         .from("pipeline_jobs")
         .update({
-          status: 'generating',
+          status: "generating",
           current_batch_offset: 0,
           updated_at: new Date().toISOString(),
         })
@@ -91,10 +99,10 @@ export async function POST(req: Request) {
 
   console.log(`[vectorize] Vectorizing ${posts.length} posts`);
 
-  const texts = posts.map(p => p.text);
+  const texts = posts.map((p) => p.text);
 
   const embeddingRes = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
+    model: "text-embedding-3-small",
     input: texts,
     dimensions: 1536,
   });
@@ -103,43 +111,63 @@ export async function POST(req: Request) {
     id: `post-${post.id}`,
     values: embeddingRes.data[i].embedding,
     metadata: {
-      // Pinecone only supports list of strings, not list of numbers
       industry_ids: (post.industry_ids || []).map(String),
-      text: post.text.substring(0, 40000), // Pinecone metadata limit
+      text: post.text,
+      source_url: post.source_url || "",
+      author_url: post.author_url || "",
+      name: post.name || "",
+      title: post.occupation || post.headline || "",
     },
   }));
 
   console.log(`[vectorize] Upserting ${vectors.length} vectors to Pinecone`);
-  console.log(`[vectorize] Sample vector structure:`, JSON.stringify({
-    id: vectors[0].id,
-    values_length: vectors[0].values.length,
-    metadata: vectors[0].metadata
-  }, null, 2));
+  console.log(
+    `[vectorize] Sample vector structure:`,
+    JSON.stringify(
+      {
+        id: vectors[0].id,
+        values_length: vectors[0].values.length,
+        metadata: vectors[0].metadata,
+      },
+      null,
+      2,
+    ),
+  );
 
   try {
-    await index.namespace('default').upsert(vectors);
-    console.log(`[vectorize] Successfully upserted ${vectors.length} vectors to Pinecone`);
+    await index.namespace("default").upsert(vectors);
+    console.log(
+      `[vectorize] Successfully upserted ${vectors.length} vectors to Pinecone`,
+    );
   } catch (error: any) {
-    console.error('[vectorize] ========== PINECONE UPSERT ERROR ==========');
-    console.error('[vectorize] Error message:', error?.message);
-    console.error('[vectorize] Error name:', error?.name);
-    console.error('[vectorize] Error stack:', error?.stack);
-    console.error('[vectorize] Full error object:', JSON.stringify(error, null, 2));
-    console.error('[vectorize] Sample vector that failed:', JSON.stringify(vectors[0], null, 2));
-    console.error('[vectorize] ===========================================');
+    console.error("[vectorize] ========== PINECONE UPSERT ERROR ==========");
+    console.error("[vectorize] Error message:", error?.message);
+    console.error("[vectorize] Error name:", error?.name);
+    console.error("[vectorize] Error stack:", error?.stack);
+    console.error(
+      "[vectorize] Full error object:",
+      JSON.stringify(error, null, 2),
+    );
+    console.error(
+      "[vectorize] Sample vector that failed:",
+      JSON.stringify(vectors[0], null, 2),
+    );
+    console.error("[vectorize] ===========================================");
     throw error;
   }
 
   const { data: totalCount } = await supa
     .from("posts")
-    .select("id", { count: 'exact', head: true })
+    .select("id", { count: "exact", head: true })
     .gte("created_at", oneDayAgo);
 
   const totalPosts = (totalCount as any)?.count || 0;
   const newOffset = batchOffset + batchSize;
   const isDone = newOffset >= totalPosts;
 
-  console.log(`[vectorize] Batch complete. Vectorized: ${posts.length}, Done: ${isDone}`);
+  console.log(
+    `[vectorize] Batch complete. Vectorized: ${posts.length}, Done: ${isDone}`,
+  );
 
   const updateData: any = {
     current_batch_offset: isDone ? 0 : newOffset,
@@ -148,14 +176,13 @@ export async function POST(req: Request) {
   };
 
   if (isDone) {
-    updateData.status = 'generating';
-    console.log('[vectorize] All posts vectorized, transitioning to generating');
+    updateData.status = "generating";
+    console.log(
+      "[vectorize] All posts vectorized, transitioning to generating",
+    );
   }
 
-  await supa
-    .from("pipeline_jobs")
-    .update(updateData)
-    .eq("id", job.id);
+  await supa.from("pipeline_jobs").update(updateData).eq("id", job.id);
 
   return NextResponse.json({ ok: true, vectorized: posts.length });
 }

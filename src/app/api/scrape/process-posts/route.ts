@@ -214,6 +214,8 @@ export async function POST(req: Request) {
     }
 
     const industryIds = profile.industry_ids || [];
+    const sourceUrl = item.url || "";
+    const authorUrl = item.inputUrl || profileUrl;
 
     const { error } = await supa.from("posts").insert({
       urn: item.urn,
@@ -223,6 +225,8 @@ export async function POST(req: Request) {
       text,
       posted_at: new Date(item.postedAtTimestamp).toISOString(),
       industry_ids: industryIds,
+      source_url: sourceUrl,
+      author_url: authorUrl,
     });
 
     if (error) {

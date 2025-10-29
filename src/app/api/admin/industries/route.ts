@@ -6,6 +6,13 @@ const supabase = createClient(
   process.env.SUPABASE_SECRET_KEY!,
 );
 
+async function processBatch<T>(items: T[], batchSize: number, processor: (batch: T[]) => Promise<void>) {
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    await processor(batch);
+  }
+}
+
 export async function GET() {
   const { data, error } = await supabase
     .from("industries")
@@ -59,16 +66,40 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (toDelete.length > 0) {
-        await supabase.from("linkedin").delete().in("id", toDelete);
+      await processBatch(toDelete, 10, async (batch) => {
+        await supabase.from("linkedin").delete().in("id", batch);
+      });
+
+      await processBatch(toUpdate, 10, async (batch) => {
+        for (const upd of batch) {
+          await supabase
+            .from("linkedin")
+            .update({ industry_ids: upd.industry_ids })
+            .eq("id", upd.id);
+        }
+      });
+    }
+
+    const { data: userRows } = await supabase
+      .from("users")
+      .select("id, industry_ids")
+      .contains("industry_ids", [id]);
+
+    if (userRows && userRows.length > 0) {
+      const updates: Array<{ id: number; industry_ids: number[] }> = [];
+      for (const row of userRows) {
+        const filtered = (row.industry_ids || []).filter((iid: number) => iid !== id);
+        updates.push({ id: row.id, industry_ids: filtered });
       }
 
-      for (const upd of toUpdate) {
-        await supabase
-          .from("linkedin")
-          .update({ industry_ids: upd.industry_ids })
-          .eq("id", upd.id);
-      }
+      await processBatch(updates, 10, async (batch) => {
+        for (const upd of batch) {
+          await supabase
+            .from("users")
+            .update({ industry_ids: upd.industry_ids })
+            .eq("id", upd.id);
+        }
+      });
     }
 
     const { error } = await supabase.from("industries").delete().eq("id", id);

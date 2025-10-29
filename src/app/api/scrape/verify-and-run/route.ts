@@ -61,7 +61,7 @@ export async function POST() {
   const { data: cfg } = await supa
     .from("config")
     .select(
-      "cookie_default,user_agent,min_delay,max_delay,deep_scrape,raw_data,proxy,limit_per_source",
+      "cookie_default,user_agent,min_delay,max_delay,deep_scrape,raw_data,proxy,limit_per_source,memory_mbytes",
     )
     .limit(1)
     .single();
@@ -108,7 +108,7 @@ export async function POST() {
   };
 
   const res = await fetch(
-    `https://api.apify.com/v2/acts/curious_coder~linkedin-post-search-scraper/runs?token=${process.env.APIFY_TOKEN}&memory=8192`,
+    `https://api.apify.com/v2/acts/curious_coder~linkedin-post-search-scraper/runs?token=${process.env.APIFY_TOKEN}&memory=${cfg.memory_mbytes || 512}`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
