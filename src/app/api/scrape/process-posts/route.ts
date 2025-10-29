@@ -107,11 +107,11 @@ export async function POST(req: Request) {
 
   for (const item of items) {
     const profileUrl = norm(
-      item?.inputUrl ||
-        item?.authorProfileUrl ||
+      item?.authorProfileUrl ||
         (item?.author?.publicId
           ? `https://www.linkedin.com/in/${item.author.publicId}`
           : "") ||
+        item?.inputUrl ||
         (item?.activityOfUser?.publicId
           ? `https://www.linkedin.com/in/${item.activityOfUser.publicId}`
           : ""),

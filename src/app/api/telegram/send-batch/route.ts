@@ -40,7 +40,14 @@ export async function POST(req: Request) {
     .gte("created_at", today);
 
   if (!messages || messages.length === 0) {
-    console.log('[send-batch] No messages for today');
+    console.log('[send-batch] No messages for today, transitioning to completed');
+    await supa
+      .from("pipeline_jobs")
+      .update({
+        status: 'completed',
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
     return NextResponse.json({ ok: true, sent: 0 });
   }
 
