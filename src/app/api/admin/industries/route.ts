@@ -41,6 +41,36 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === "delete") {
+    const { data: linkedinRows } = await supabase
+      .from("linkedin")
+      .select("id, url, industry_ids")
+      .contains("industry_ids", [id]);
+
+    if (linkedinRows && linkedinRows.length > 0) {
+      const toDelete: number[] = [];
+      const toUpdate: Array<{ id: number; industry_ids: number[] }> = [];
+
+      for (const row of linkedinRows) {
+        const filtered = (row.industry_ids || []).filter((iid: number) => iid !== id);
+        if (filtered.length === 0) {
+          toDelete.push(row.id);
+        } else {
+          toUpdate.push({ id: row.id, industry_ids: filtered });
+        }
+      }
+
+      if (toDelete.length > 0) {
+        await supabase.from("linkedin").delete().in("id", toDelete);
+      }
+
+      for (const upd of toUpdate) {
+        await supabase
+          .from("linkedin")
+          .update({ industry_ids: upd.industry_ids })
+          .eq("id", upd.id);
+      }
+    }
+
     const { error } = await supabase.from("industries").delete().eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });

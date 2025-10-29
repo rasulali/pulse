@@ -10,25 +10,18 @@ const sadmin = () =>
     },
   );
 
-const norm = (u: string) => {
-  try {
-    const x = new URL(u);
-    return `${x.origin}${x.pathname.replace(/\/+$/, "")}`;
-  } catch {
-    return u;
-  }
-};
-
 export async function POST(req: Request) {
-  const { url, industry_ids } = (await req.json()) as {
-    url: string;
+  const { id, industry_ids } = (await req.json()) as {
+    id: number;
     industry_ids: number[];
   };
-  if (!url)
+
+  if (!id || typeof id !== "number")
     return NextResponse.json(
-      { ok: false, message: "url_required" },
+      { ok: false, message: "id_required" },
       { status: 400 },
     );
+
   if (!Array.isArray(industry_ids) || industry_ids.length === 0)
     return NextResponse.json(
       { ok: false, message: "industry_required" },
@@ -36,6 +29,7 @@ export async function POST(req: Request) {
     );
 
   const supa = sadmin();
+
   let ids = industry_ids
     .filter((n: unknown) => Number.isInteger(n as number))
     .map((n: any) => Number(n));
@@ -46,40 +40,23 @@ export async function POST(req: Request) {
     .in("id", ids);
   const allow = new Set((valid || []).map((r: any) => Number(r.id)));
   ids = ids.filter((id) => allow.has(id));
+
   if (ids.length === 0)
     return NextResponse.json(
       { ok: false, message: "industry_invalid" },
       { status: 400 },
     );
 
-  const u = norm(url);
-
-  const { data: existing } = await supa
-    .from("linkedin")
-    .select("id, industry_ids, allowed")
-    .eq("url", u)
-    .maybeSingle();
-
-  let mergedIds = ids;
-  let allowed = false;
-
-  if (existing) {
-    const existingIds = existing.industry_ids || [];
-    mergedIds = Array.from(new Set([...existingIds, ...ids]));
-    allowed = existing.allowed;
-  }
-
   const { error } = await supa
     .from("linkedin")
-    .upsert(
-      { url: u, allowed, industry_ids: mergedIds },
-      { onConflict: "url", ignoreDuplicates: false },
-    );
+    .update({ industry_ids: ids })
+    .eq("id", id);
 
   if (error)
     return NextResponse.json(
-      { ok: false, message: "upsert_failed" },
+      { ok: false, message: "update_failed" },
       { status: 400 },
     );
+
   return NextResponse.json({ ok: true });
 }

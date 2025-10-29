@@ -107,6 +107,28 @@ export default function Page() {
     mode: "create" | "edit";
     data?: Signal;
   }>({ open: false, mode: "create" });
+  const [deleteIndustryConfirm, setDeleteIndustryConfirm] = useState<{
+    open: boolean;
+    id?: number;
+    name?: string;
+  }>({ open: false });
+  const [deleteSignalConfirm, setDeleteSignalConfirm] = useState<{
+    open: boolean;
+    id?: number;
+    name?: string;
+  }>({ open: false });
+  const [deletingIndustryId, setDeletingIndustryId] = useState<number | null>(
+    null,
+  );
+  const [deletingSignalId, setDeletingSignalId] = useState<number | null>(null);
+  const [saveConfigConfirm, setSaveConfigConfirm] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [editIndustriesModal, setEditIndustriesModal] = useState<{
+    open: boolean;
+    row?: Row;
+  }>({ open: false });
+  const [editingIndustryIds, setEditingIndustryIds] = useState<number[]>([]);
+  const [updatingIndustries, setUpdatingIndustries] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -200,21 +222,35 @@ export default function Page() {
   };
 
   const handleIndustry = async (action: string, data?: any) => {
+    if (action === "delete") {
+      setDeletingIndustryId(data.id);
+    }
     await fetch("/api/admin/industries", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, ...data }),
     });
     await loadAdminIndustries();
+    if (action === "delete") {
+      setDeletingIndustryId(null);
+      setDeleteIndustryConfirm({ open: false });
+    }
   };
 
   const handleSignal = async (action: string, data?: any) => {
+    if (action === "delete") {
+      setDeletingSignalId(data.id);
+    }
     await fetch("/api/admin/signals", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action, ...data }),
     });
     await loadAdminSignals();
+    if (action === "delete") {
+      setDeletingSignalId(null);
+      setDeleteSignalConfirm({ open: false });
+    }
   };
 
   const handleUser = async (action: string, id: number) => {
@@ -227,12 +263,31 @@ export default function Page() {
   };
 
   const handleConfigUpdate = async (updates: Partial<ConfigData>) => {
+    setSavingConfig(true);
     await fetch("/api/admin/config", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(updates),
     });
     await loadAdminConfig();
+    setSavingConfig(false);
+    setSaveConfigConfirm(false);
+  };
+
+  const updateLinkIndustries = async () => {
+    if (editingIndustryIds.length === 0 || !editIndustriesModal.row) return;
+    setUpdatingIndustries(true);
+    await fetch("/api/links/update-industries", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: editIndustriesModal.row.id,
+        industry_ids: editingIndustryIds,
+      }),
+    });
+    await loadLists();
+    setUpdatingIndustries(false);
+    setEditIndustriesModal({ open: false });
   };
 
   useEffect(() => {
@@ -475,7 +530,9 @@ export default function Page() {
             <FiRefreshCw
               className={`w-4 h-4 ${tableFrozen ? "animate-spin" : ""}`}
             />
-            <span>{tableFrozen ? "Cancel" : "Refresh All"}</span>
+            <span className="truncate">
+              {tableFrozen ? "Cancel" : "Refresh All"}
+            </span>
           </button>
 
           <button
@@ -484,7 +541,7 @@ export default function Page() {
             className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <FiSend className="w-4 h-4" />
-            <span>Run Pipeline</span>
+            <span className="truncate">Run Pipeline</span>
           </button>
 
           <div className="flex-1 flex gap-2">
@@ -527,7 +584,7 @@ export default function Page() {
                 className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700"
               >
                 <FiTag className="w-4 h-4" />
-                <span>{allVisibleSelected}</span>
+                <span className="truncate">{allVisibleSelected}</span>
               </button>
               {indOpen && (
                 <div className="absolute z-40 mt-2 w-80 bg-white border border-neutral-200 rounded-md shadow-lg p-3">
@@ -633,7 +690,7 @@ export default function Page() {
               className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
             >
               <FiTrash2 className="w-4 h-4" />
-              <span>Delete Everything</span>
+              <span className="truncate">Delete Everything</span>
             </button>
           </div>
         </div>
@@ -715,8 +772,8 @@ export default function Page() {
 
       <section className="mx-auto max-w-[1600px] px-6 py-4">
         <div className="grid grid-cols-2 gap-6">
-          <div className="bg-white border border-neutral-200 rounded-lg p-6">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white border border-neutral-200 rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 bg-neutral-50">
               <h3 className="text-sm font-semibold text-neutral-900 uppercase tracking-wide">
                 <FiUsers className="inline w-4 h-4 mr-1" />
                 Users ({users.length})
@@ -726,16 +783,16 @@ export default function Page() {
               <table className="w-full">
                 <thead className="sticky top-0 bg-white border-b border-neutral-200">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-600 uppercase">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600 uppercase tracking-wider">
                       Email
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-600 uppercase">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600 uppercase tracking-wider">
                       Name
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-600 uppercase">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600 uppercase tracking-wider">
                       Chat ID
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-neutral-600 uppercase w-[180px]">
+                    <th className="px-6 py-3 text-right text-xs font-medium text-neutral-600 uppercase tracking-wider w-[180px]">
                       Actions
                     </th>
                   </tr>
@@ -744,19 +801,22 @@ export default function Page() {
                   {[...users]
                     .sort((a, b) => (b.is_admin ? 1 : 0) - (a.is_admin ? 1 : 0))
                     .map((u) => (
-                      <tr key={u.id} className="hover:bg-neutral-50">
-                        <td className="px-4 py-3 text-sm text-neutral-900">
+                      <tr
+                        key={u.id}
+                        className="hover:bg-neutral-50 transition-colors"
+                      >
+                        <td className="px-6 py-4 text-sm text-neutral-900">
                           {u.email}
                         </td>
-                        <td className="px-4 py-3 text-sm text-neutral-600">
+                        <td className="px-6 py-4 text-sm text-neutral-600">
                           {[u.first_name, u.last_name]
                             .filter(Boolean)
                             .join(" ") || "—"}
                         </td>
-                        <td className="px-4 py-3 text-sm text-neutral-600">
+                        <td className="px-6 py-4 text-sm text-neutral-600">
                           {u.telegram_chat_id || "—"}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-4">
                           <div className="flex items-center justify-end gap-2">
                             {u.telegram_chat_id && (
                               <button
@@ -827,10 +887,14 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                     />
                   </div>
                   <button
-                    onClick={() => handleConfigUpdate(config)}
-                    className="cursor-pointer px-4 py-2 text-sm rounded bg-neutral-900 text-white hover:bg-neutral-800"
+                    onClick={() => setSaveConfigConfirm(true)}
+                    disabled={savingConfig}
+                    className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded bg-neutral-900 text-white hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Save Config
+                    {savingConfig && (
+                      <FiRefreshCw className="w-4 h-4 animate-spin" />
+                    )}
+                    <span>Save Config</span>
                   </button>
                 </div>
               )}
@@ -902,11 +966,20 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                             </button>
                             <button
                               onClick={() =>
-                                handleIndustry("delete", { id: ind.id })
+                                setDeleteIndustryConfirm({
+                                  open: true,
+                                  id: ind.id,
+                                  name: ind.name,
+                                })
                               }
-                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
+                              disabled={deletingIndustryId === ind.id}
+                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <FiTrash2 className="w-3.5 h-3.5" />
+                              {deletingIndustryId === ind.id ? (
+                                <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <FiTrash2 className="w-3.5 h-3.5" />
+                              )}
                             </button>
                           </div>
                         </td>
@@ -981,11 +1054,20 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                             </button>
                             <button
                               onClick={() =>
-                                handleSignal("delete", { id: sig.id })
+                                setDeleteSignalConfirm({
+                                  open: true,
+                                  id: sig.id,
+                                  name: sig.name,
+                                })
                               }
-                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
+                              disabled={deletingSignalId === sig.id}
+                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              <FiTrash2 className="w-3.5 h-3.5" />
+                              {deletingSignalId === sig.id ? (
+                                <FiRefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <FiTrash2 className="w-3.5 h-3.5" />
+                              )}
                             </button>
                           </div>
                         </td>
@@ -1023,16 +1105,11 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                 const name = (
                   form.elements.namedItem("name") as HTMLInputElement
                 ).value;
-                const visible = (
-                  form.elements.namedItem("visible") as HTMLInputElement
-                ).checked;
                 if (industryModal.mode === "create") {
-                  handleIndustry("create", { name, visible });
+                  handleIndustry("create", { name, visible: false });
                 } else {
                   handleIndustry("update", {
-                    id: industryModal.data?.id,
                     name,
-                    visible,
                   });
                 }
                 setIndustryModal({ open: false, mode: "create" });
@@ -1095,9 +1172,6 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                 const name = (
                   form.elements.namedItem("name") as HTMLInputElement
                 ).value;
-                const visible = (
-                  form.elements.namedItem("visible") as HTMLInputElement
-                ).checked;
                 const prompt = (
                   form.elements.namedItem("prompt") as HTMLTextAreaElement
                 ).value;
@@ -1109,7 +1183,7 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                 if (signalModal.mode === "create") {
                   handleSignal("create", {
                     name,
-                    visible,
+                    visible: false,
                     prompt,
                     embedding_query,
                   });
@@ -1117,7 +1191,6 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                   handleSignal("update", {
                     id: signalModal.data?.id,
                     name,
-                    visible,
                     prompt,
                     embedding_query,
                   });
@@ -1201,9 +1274,214 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
               </button>
               <button
                 onClick={() => runRefresh()}
-                className="cursor-pointer px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 transition-colors"
+                className="cursor-pointer px-4 py-2 text-sm rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors"
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteIndustryConfirm.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-md w-full p-6">
+            <h2 className="text-lg font-semibold text-neutral-900 mb-2">
+              Delete industry "{deleteIndustryConfirm.name}"?
+            </h2>
+            <p className="text-sm text-neutral-600 mb-6">
+              This will remove the industry and clean up all LinkedIn profiles.
+              Links with only this industry will be deleted. Links with multiple
+              industries will have this industry removed.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteIndustryConfirm({ open: false })}
+                disabled={deletingIndustryId !== null}
+                className="cursor-pointer px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() =>
+                  handleIndustry("delete", { id: deleteIndustryConfirm.id })
+                }
+                disabled={deletingIndustryId !== null}
+                className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletingIndustryId === deleteIndustryConfirm.id && (
+                  <FiRefreshCw className="w-4 h-4 animate-spin" />
+                )}
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteSignalConfirm.open && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-md w-full p-6">
+            <h2 className="text-lg font-semibold text-neutral-900 mb-2">
+              Delete signal "{deleteSignalConfirm.name}"?
+            </h2>
+            <p className="text-sm text-neutral-600 mb-6">
+              This will permanently remove the signal. This action cannot be
+              undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteSignalConfirm({ open: false })}
+                disabled={deletingSignalId !== null}
+                className="cursor-pointer px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() =>
+                  handleSignal("delete", { id: deleteSignalConfirm.id })
+                }
+                disabled={deletingSignalId !== null}
+                className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deletingSignalId === deleteSignalConfirm.id && (
+                  <FiRefreshCw className="w-4 h-4 animate-spin" />
+                )}
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {saveConfigConfirm && config && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-md w-full p-6">
+            <h2 className="text-lg font-semibold text-neutral-900 mb-2">
+              Save scraper configuration?
+            </h2>
+            <p className="text-sm text-neutral-600 mb-6">
+              This will update the scraper settings. The new configuration will
+              be used for all future scraping operations.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setSaveConfigConfirm(false)}
+                disabled={savingConfig}
+                className="cursor-pointer px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleConfigUpdate(config)}
+                disabled={savingConfig}
+                className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingConfig && (
+                  <FiRefreshCw className="w-4 h-4 animate-spin" />
+                )}
+                <span>Save</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editIndustriesModal.open && editIndustriesModal.row && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-xl w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-neutral-900">
+                Edit Industries
+              </h2>
+              <button
+                onClick={() => setEditIndustriesModal({ open: false })}
+                disabled={updatingIndustries}
+                className="cursor-pointer text-neutral-500 hover:text-neutral-700 disabled:opacity-50"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-sm text-neutral-600 mb-1">Profile:</p>
+              <a
+                href={editIndustriesModal.row.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-blue-600 hover:text-blue-700 break-all"
+              >
+                {editIndustriesModal.row.name || editIndustriesModal.row.url}
+              </a>
+            </div>
+
+            <div className="mb-4">
+              <p className="text-sm font-medium text-neutral-700 mb-3">
+                Select Industries{" "}
+                <span className="text-neutral-500 font-normal">
+                  (at least one required)
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto p-3 bg-neutral-50 rounded-lg border border-neutral-200">
+                {industryOptions.map((ind) => {
+                  const isSelected = editingIndustryIds.includes(ind.id);
+                  return (
+                    <button
+                      key={ind.id}
+                      onClick={() => {
+                        if (isSelected) {
+                          if (editingIndustryIds.length > 1) {
+                            setEditingIndustryIds(
+                              editingIndustryIds.filter((id) => id !== ind.id),
+                            );
+                          }
+                        } else {
+                          setEditingIndustryIds([
+                            ...editingIndustryIds,
+                            ind.id,
+                          ]);
+                        }
+                      }}
+                      disabled={
+                        updatingIndustries ||
+                        (isSelected && editingIndustryIds.length === 1)
+                      }
+                      className={`cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                        isSelected
+                          ? "bg-neutral-900 text-white border-neutral-900"
+                          : "bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50"
+                      }`}
+                    >
+                      <span className="truncate max-w-[200px]">{ind.name}</span>
+                      {isSelected && (
+                        <FiX className="w-3.5 h-3.5 flex-shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-neutral-500 mt-2">
+                {editingIndustryIds.length} industry(ies) selected
+              </p>
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setEditIndustriesModal({ open: false })}
+                disabled={updatingIndustries}
+                className="cursor-pointer px-4 py-2 text-sm rounded-md border border-neutral-300 hover:bg-neutral-50 transition-colors text-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={updateLinkIndustries}
+                disabled={updatingIndustries || editingIndustryIds.length === 0}
+                className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 text-sm rounded-md bg-neutral-900 text-white hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {updatingIndustries && (
+                  <FiRefreshCw className="w-4 h-4 animate-spin" />
+                )}
+                <span>Save Changes</span>
               </button>
             </div>
           </div>
@@ -1248,7 +1526,7 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                       <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600 uppercase tracking-wider">
                         Info
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-neutral-600 uppercase tracking-wider w-[220px]">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-neutral-600 uppercase tracking-wider w-[270px]">
                         Actions
                       </th>
                     </tr>
@@ -1301,6 +1579,22 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex items-center justify-end gap-2">
+                                <button
+                                  disabled={tableFrozen || busy}
+                                  onClick={() => {
+                                    setEditIndustriesModal({
+                                      open: true,
+                                      row: x,
+                                    });
+                                    setEditingIndustryIds([
+                                      ...(x.industry_ids || []),
+                                    ]);
+                                  }}
+                                  className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                                  title="Edit industries"
+                                >
+                                  <FiTag className="w-3.5 h-3.5" />
+                                </button>
                                 <button
                                   disabled={tableFrozen || busy || isLoading}
                                   onClick={() => refreshOne(x.id)}
@@ -1391,7 +1685,7 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                       <th className="px-6 py-3 text-left text-xs font-medium text-neutral-600 uppercase tracking-wider">
                         Info
                       </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-neutral-600 uppercase tracking-wider w-[220px]">
+                      <th className="px-6 py-3 text-right text-xs font-medium text-neutral-600 uppercase tracking-wider w-[270px]">
                         Actions
                       </th>
                     </tr>
@@ -1433,6 +1727,22 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex items-center justify-end gap-2">
+                                <button
+                                  disabled={tableFrozen || busy}
+                                  onClick={() => {
+                                    setEditIndustriesModal({
+                                      open: true,
+                                      row: x,
+                                    });
+                                    setEditingIndustryIds([
+                                      ...(x.industry_ids || []),
+                                    ]);
+                                  }}
+                                  className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
+                                  title="Edit industries"
+                                >
+                                  <FiTag className="w-3.5 h-3.5" />
+                                </button>
                                 <button
                                   disabled={tableFrozen || busy || isLoading}
                                   onClick={() => refreshOne(x.id)}

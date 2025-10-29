@@ -56,7 +56,28 @@ export async function POST(req: Request) {
 
   if (!urls.length) return NextResponse.json({ ok: true, inserted: 0 });
 
-  const rows = urls.map((u) => ({ url: u, allowed: false, industry_ids: ids }));
+  const { data: existing } = await supa
+    .from("linkedin")
+    .select("url, industry_ids, allowed")
+    .in("url", urls);
+
+  const existingMap = new Map<string, { industry_ids: number[]; allowed: boolean }>();
+  if (existing) {
+    for (const row of existing) {
+      existingMap.set(row.url, {
+        industry_ids: row.industry_ids || [],
+        allowed: row.allowed
+      });
+    }
+  }
+
+  const rows = urls.map((u) => {
+    const existing = existingMap.get(u);
+    const existingIds = existing?.industry_ids || [];
+    const mergedIds = Array.from(new Set([...existingIds, ...ids]));
+    const allowed = existing?.allowed ?? false;
+    return { url: u, allowed, industry_ids: mergedIds };
+  });
 
   const { error, data } = await supa
     .from("linkedin")
