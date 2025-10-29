@@ -8,7 +8,10 @@ const sadmin = () =>
     { auth: { persistSession: false } },
   );
 
-async function notifyAdmins(supa: ReturnType<typeof sadmin>, errorMessage: string) {
+async function notifyAdmins(
+  supa: ReturnType<typeof sadmin>,
+  errorMessage: string,
+) {
   const { data: adminUsers } = await supa
     .from("users")
     .select("telegram_chat_id")
@@ -20,7 +23,7 @@ async function notifyAdmins(supa: ReturnType<typeof sadmin>, errorMessage: strin
     .filter(Boolean);
 
   if (adminChatIds.length === 0) {
-    console.log('[verify-and-run] No admin chat IDs configured');
+    console.log("[verify-and-run] No admin chat IDs configured");
     return;
   }
 
@@ -31,18 +34,21 @@ async function notifyAdmins(supa: ReturnType<typeof sadmin>, errorMessage: strin
       await fetch(
         `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
         {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          method: "POST",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify({
             chat_id: chatId,
             text: message,
-            parse_mode: 'HTML',
+            parse_mode: "HTML",
           }),
-        }
+        },
       );
       console.log(`[verify-and-run] Notified admin ${chatId}`);
     } catch (error) {
-      console.error(`[verify-and-run] Failed to notify admin ${chatId}:`, error);
+      console.error(
+        `[verify-and-run] Failed to notify admin ${chatId}:`,
+        error,
+      );
     }
   }
 }
@@ -102,7 +108,7 @@ export async function POST() {
   };
 
   const res = await fetch(
-    `https://api.apify.com/v2/acts/curious_coder~linkedin-post-search-scraper/runs?token=${process.env.APIFY_TOKEN}&memory=${process.env.APIFY_MEMORY_MBYTES}`,
+    `https://api.apify.com/v2/acts/curious_coder~linkedin-post-search-scraper/runs?token=${process.env.APIFY_TOKEN}&memory=8192`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
