@@ -21,6 +21,29 @@ const norm = (u: string) => {
 
 const rx = /[A-Za-z\u00C0-\u024F\u0400-\u04FF]/u;
 
+const pickOcc = (x: ApifyItem) => {
+  if (x?.isActivity) {
+    return cleanText(x?.activityOfUser?.occupation || "");
+  }
+  return cleanText(x?.author?.occupation || "");
+};
+
+const pickName = (x: ApifyItem) => {
+  if (x?.isActivity) {
+    const fn = cleanText(x?.activityOfUser?.firstName || "");
+    const ln = cleanText(x?.activityOfUser?.lastName || "");
+    return [fn, ln].filter(Boolean).join(" ").trim();
+  }
+  const fn = cleanText(x?.author?.firstName || "");
+  const ln = cleanText(x?.author?.lastName || "");
+  return [fn, ln].filter(Boolean).join(" ").trim();
+};
+
+const pickHead = (x: ApifyItem) => {
+  if (x?.isActivity) return "";
+  return cleanText(x?.authorHeadline || "");
+};
+
 export async function POST(req: Request) {
   console.log("[process-posts] Starting batch processing");
 
@@ -107,11 +130,11 @@ export async function POST(req: Request) {
 
   for (const item of items) {
     const profileUrl = norm(
-      item?.authorProfileUrl ||
+      item?.inputUrl ||
+        item?.authorProfileUrl ||
         (item?.author?.publicId
           ? `https://www.linkedin.com/in/${item.author.publicId}`
           : "") ||
-        item?.inputUrl ||
         (item?.activityOfUser?.publicId
           ? `https://www.linkedin.com/in/${item.activityOfUser.publicId}`
           : ""),
@@ -137,22 +160,9 @@ export async function POST(req: Request) {
       continue;
     }
 
-    let name = "";
-    let occupation = "";
-    let headline = "";
-
-    if (item.isActivity) {
-      const fn = cleanText(item.activityOfUser?.firstName || "");
-      const ln = cleanText(item.activityOfUser?.lastName || "");
-      name = [fn, ln].filter(Boolean).join(" ").trim();
-      occupation = cleanText(item.activityOfUser?.occupation || "");
-    } else {
-      const fn = cleanText(item.author?.firstName || "");
-      const ln = cleanText(item.author?.lastName || "");
-      name = [fn, ln].filter(Boolean).join(" ").trim();
-      occupation = cleanText(item.author?.occupation || "");
-      headline = cleanText(item.authorHeadline || "");
-    }
+    const name = pickName(item);
+    const occupation = pickOcc(item);
+    const headline = pickHead(item);
 
     const profileOccupation = cleanText(profile.occupation || "");
     const profileHeadline = cleanText(profile.headline || "");
