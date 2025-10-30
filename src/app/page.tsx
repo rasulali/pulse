@@ -344,22 +344,9 @@ export default function Page() {
     [R, selectedIndustryIds],
   );
 
-  const runRefresh = async (opts?: { datasetUrl?: string }) => {
+  const runRefresh = async () => {
     setConfirmOpen(false);
     setTableFrozen(true);
-    if (opts?.datasetUrl) {
-      try {
-        await fetch("/api/links/refresh-from-dataset", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ datasetUrl: opts.datasetUrl }),
-        });
-        await loadLists();
-      } finally {
-        setTableFrozen(false);
-      }
-      return;
-    }
     const c = new AbortController();
     ctrlRef.current = c;
     try {

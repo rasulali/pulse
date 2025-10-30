@@ -164,7 +164,11 @@
     "/api/links/refresh": {
         "method": "POST",
         "auth": "server-only",
-        "effect": "Run APIFY actor sync with 8GB; uses config table settings"
+        "effect": "Run APIFY actor sync with 8GB; uses config table settings",
+        "notes": [
+            "Normalizes scraped name/occupation/headline text (NFKC, zero-width removed, whitespace collapsed) before validating characters",
+            "Sets occupation/headline only when the normalized strings contain readable characters (rx test); occupation takes precedence over headline for allowed flag"
+        ]
     },
     "/api/links/refresh-one": {
         "method": "POST",
@@ -172,7 +176,10 @@
         "input": {
             "id": "number"
         },
-        "effect": "Run actor sync for a single linkedin.url"
+        "effect": "Run actor sync for a single linkedin.url",
+        "notes": [
+            "Applies same normalized text validation as /api/links/refresh prior to updating occupation/headline/allowed"
+        ]
     },
     "/api/register": {
         "method": "POST",
@@ -266,8 +273,8 @@
             "Fetch items from Apify dataset (batch_offset, batch_size)",
             "For each item:",
             "  - Extract profile URL, find linkedin profile",
-            "  - Extract occupation/headline with fallbacks",
-            "  - Verify: if profile.occupation exists, check exact match; if profile.headline exists, check exact match",
+            "  - Extract occupation/headline with fallbacks; normalize (NFKC, remove zero-width, collapse whitespace)",
+            "  - Verify: if profile.occupation exists, compare normalized strings; if profile.headline exists, compare normalized strings",
             "  - If mismatch: set allowed=false, skip",
             "  - Check URN exists in posts (deduplicate)",
             "  - Filter posts older than 24h",
@@ -1126,6 +1133,17 @@ failed ←---+----+------+------------+------------+-----------+
    - Issue: `.not("status", "in", ["completed", "failed"])` threw PGRST100 error
    - Fix: Changed to `.not("status", "in", "(completed,failed)")`
    - Applied in: page.tsx and cron/advance/route.ts
+
+6. **Refresh endpoints timeout on production** (PENDING FIX)
+   - Issue: /api/links/refresh and /api/links/refresh-one use sync Apify runs (run-sync-get-dataset-items)
+   - Problem: Sync runs wait for Apify completion, causing serverless function timeouts (25-30s limit)
+   - Current behavior: Pipeline uses async runs (/runs endpoint) with polling, which works fine
+   - Required fix: Convert refresh endpoints to use async Apify runs with either:
+     - Option 1: Backend polling with timeout (25s max)
+     - Option 2: Reuse pipeline_jobs system with frontend polling
+     - Option 3: Hybrid approach (try sync first, fallback to async)
+   - Affected endpoints: /api/links/refresh, /api/links/refresh-one
+   - Status: Documented, not yet implemented
 
 ------
 

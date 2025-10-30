@@ -142,22 +142,25 @@ export async function POST(req: Request) {
     let headline = "";
 
     if (item.isActivity) {
-      const fn = (item.activityOfUser?.firstName || "").trim();
-      const ln = (item.activityOfUser?.lastName || "").trim();
+      const fn = cleanText(item.activityOfUser?.firstName || "");
+      const ln = cleanText(item.activityOfUser?.lastName || "");
       name = [fn, ln].filter(Boolean).join(" ").trim();
-      occupation = (item.activityOfUser?.occupation || "").trim();
+      occupation = cleanText(item.activityOfUser?.occupation || "");
     } else {
-      const fn = (item.author?.firstName || "").trim();
-      const ln = (item.author?.lastName || "").trim();
+      const fn = cleanText(item.author?.firstName || "");
+      const ln = cleanText(item.author?.lastName || "");
       name = [fn, ln].filter(Boolean).join(" ").trim();
-      occupation = (item.author?.occupation || "").trim();
-      headline = (item.authorHeadline || "").trim();
+      occupation = cleanText(item.author?.occupation || "");
+      headline = cleanText(item.authorHeadline || "");
     }
+
+    const profileOccupation = cleanText(profile.occupation || "");
+    const profileHeadline = cleanText(profile.headline || "");
 
     const validOcc = !!(occupation && rx.test(occupation));
     const validHead = !!(headline && rx.test(headline));
 
-    if (profile.occupation && validOcc && profile.occupation !== occupation) {
+    if (profileOccupation && validOcc && profileOccupation !== occupation) {
       console.log(
         `[process-posts] Occupation mismatch for ${profileUrl}: "${profile.occupation}" != "${occupation}"`,
       );
@@ -169,7 +172,7 @@ export async function POST(req: Request) {
       continue;
     }
 
-    if (profile.headline && validHead && profile.headline !== headline) {
+    if (profileHeadline && validHead && profileHeadline !== headline) {
       console.log(
         `[process-posts] Headline mismatch for ${profileUrl}: "${profile.headline}" != "${headline}"`,
       );

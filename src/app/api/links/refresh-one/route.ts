@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ApifyItem } from "../links.types";
+import { cleanText } from "@/lib/text";
 
 const sadmin = () =>
   createClient(
@@ -15,25 +16,25 @@ const rx = /[A-Za-z\u00C0-\u024F\u0400-\u04FF]/u;
 
 const pickOcc = (x: ApifyItem) => {
   if (x?.isActivity) {
-    return (x?.activityOfUser?.occupation || "").trim();
+    return cleanText(x?.activityOfUser?.occupation || "");
   }
-  return (x?.author?.occupation || "").trim();
+  return cleanText(x?.author?.occupation || "");
 };
 
 const pickName = (x: ApifyItem) => {
   if (x?.isActivity) {
-    const fn = (x?.activityOfUser?.firstName || "").trim();
-    const ln = (x?.activityOfUser?.lastName || "").trim();
+    const fn = cleanText(x?.activityOfUser?.firstName || "");
+    const ln = cleanText(x?.activityOfUser?.lastName || "");
     return [fn, ln].filter(Boolean).join(" ").trim();
   }
-  const fn = (x?.author?.firstName || "").trim();
-  const ln = (x?.author?.lastName || "").trim();
+  const fn = cleanText(x?.author?.firstName || "");
+  const ln = cleanText(x?.author?.lastName || "");
   return [fn, ln].filter(Boolean).join(" ").trim();
 };
 
 const pickHead = (x: ApifyItem) => {
   if (x?.isActivity) return "";
-  return (x?.authorHeadline || "").trim();
+  return cleanText(x?.authorHeadline || "");
 };
 
 export async function POST(req: Request) {
@@ -92,6 +93,7 @@ export async function POST(req: Request) {
   const name = pickName(it);
   const occ = pickOcc(it);
   const head = pickHead(it);
+
   const validOcc = !!(occ && rx.test(occ));
   const validHead = !validOcc && !!(head && rx.test(head));
   const allowed = validOcc || validHead;
