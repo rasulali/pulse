@@ -160,6 +160,16 @@ FINAL REMINDERS
     } else {
       console.log("[generate] Old messages deleted");
     }
+
+    await supa
+      .from("pipeline_jobs")
+      .update({
+        total_items: totalPairs,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+
+    console.log(`[generate] Set total_items to ${totalPairs}`);
   }
 
   if (batchOffset >= totalPairs) {

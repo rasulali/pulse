@@ -154,22 +154,53 @@ export async function POST() {
 
   console.log(`[verify-and-run] Found ${adminChatIds.length} admin chat IDs`);
 
-  const { data: job, error } = await supa
+  const { data: existingJob } = await supa
     .from("pipeline_jobs")
-    .insert({
-      status: "scraping",
-      apify_run_id: apifyRunId,
-      admin_chat_ids: adminChatIds,
-      current_batch_offset: 0,
-      total_items: 0,
-      started_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .select()
+    .select("*")
+    .eq("status", "idle")
+    .order("id", { ascending: false })
+    .limit(1)
     .single();
 
+  let job;
+  let error;
+
+  if (existingJob) {
+    console.log(`[verify-and-run] Updating existing idle job ${existingJob.id}`);
+    const { data, error: updateError } = await supa
+      .from("pipeline_jobs")
+      .update({
+        status: "scraping",
+        apify_run_id: apifyRunId,
+        admin_chat_ids: adminChatIds,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existingJob.id)
+      .select()
+      .single();
+    job = data;
+    error = updateError;
+  } else {
+    console.log(`[verify-and-run] Creating new scraping job`);
+    const { data, error: insertError } = await supa
+      .from("pipeline_jobs")
+      .insert({
+        status: "scraping",
+        apify_run_id: apifyRunId,
+        admin_chat_ids: adminChatIds,
+        current_batch_offset: 0,
+        total_items: 0,
+        started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    job = data;
+    error = insertError;
+  }
+
   if (error) {
-    const errorMsg = `Failed to create pipeline_jobs: ${error.message}`;
+    const errorMsg = `Failed to create/update pipeline_jobs: ${error.message}`;
     console.error("[verify-and-run]", errorMsg);
     await notifyAdmins(supa, errorMsg);
     return NextResponse.json(
@@ -178,7 +209,7 @@ export async function POST() {
     );
   }
 
-  console.log(`[verify-and-run] Pipeline job created: ${job.id}`);
+  console.log(`[verify-and-run] Pipeline job ${existingJob ? 'updated' : 'created'}: ${job.id}`);
 
   return NextResponse.json({ ok: true, apify_run_id: apifyRunId });
 }
