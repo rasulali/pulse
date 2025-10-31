@@ -62,9 +62,8 @@ Where [N] is the source number (1, 2, 3, etc.) that you will use for citations.
 CORE BEHAVIOR
 1) Extract only concrete business-relevant intelligence that matches the QUERY signal type.
 2) If multiple excerpts describe the same topic, merge them into one insight instead of repeating.
-3) Include specific factual details only if explicitly mentioned (dates, companies, geography, metrics, outcomes).
-4) Never invent, infer, guess, speculate, or "soft suggest" anything that is not explicitly present in the CONTEXT.
-5) You are allowed to respond with "NO_CONTENT". In fact, this is critical.
+3) Never invent, infer, guess, speculate, or "soft suggest" anything that is not explicitly present in the CONTEXT.
+4) You are allowed to respond with "NO_CONTENT". In fact, this is critical.
 
 CRITICAL FILTERING RULE
 Before you generate any output, you MUST decide if the CONTEXT actually contains information that matches the requested signal type.
@@ -93,7 +92,6 @@ If you *do* find relevant content and you are NOT returning NO_CONTENT:
 
 SOURCE ATTRIBUTION
 - Each excerpt in CONTEXT has a number [N] at the start.
-- When referencing information, note which source(s) it came from.
 - At the end of your message, always include a <b>Sources:</b> section:
   <b>Sources:</b>
   <a href="SOURCE_URL_1">Source 1</a>, <a href="SOURCE_URL_2">Source 2</a>, ...
@@ -104,7 +102,7 @@ STRUCTURE
 Follow the specific structure and requirements provided in the QUERY. The QUERY will tell you exactly what to extract and how to format it.
 
 FINAL REMINDERS
-- NEVER invent or guess missing details (dates, locations, participants, motives).
+- NEVER invent or guess missing details.
 - ALWAYS include source attribution with numbered links.
 - Use author names as clickable HTML links: <a href="AUTHOR_URL">AUTHOR_NAME</a>
 - If there is nothing relevant to the QUERY signal, output ONLY: NO_CONTENT
@@ -202,6 +200,17 @@ FINAL REMINDERS
     `[generate] Processing industry: ${industry.name}, signal: ${signal.name}`,
   );
 
+  const newOffset = batchOffset + 1;
+  await supa
+    .from("pipeline_jobs")
+    .update({
+      current_batch_offset: newOffset,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", job.id);
+
+  console.log(`[generate] Offset updated to ${newOffset} before GPT call`);
+
   const embeddingRes = await openai.embeddings.create({
     model: "text-embedding-3-small",
     input: signal.embedding_query,
@@ -212,14 +221,11 @@ FINAL REMINDERS
 
   const index = pinecone.index(process.env.PINECONE_INDEX_NAME!);
 
-  // Note: Pinecone Node.js SDK doesn't support rerank parameter yet
-  // Using semantic search with top 10 results directly
   const queryRes = await index.namespace("default").query({
     vector: embedding,
     topK: 10,
     includeMetadata: true,
     filter: {
-      // industry_ids is stored as array of strings in Pinecone
       industry_ids: { $in: [String(industry.id)] },
     },
   });
@@ -228,15 +234,6 @@ FINAL REMINDERS
     console.log(
       `[generate] No posts found for industry ${industry.name}, signal ${signal.name}`,
     );
-
-    const newOffset = batchOffset + 1;
-    await supa
-      .from("pipeline_jobs")
-      .update({
-        current_batch_offset: newOffset,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", job.id);
 
     return NextResponse.json({
       ok: true,
@@ -282,14 +279,6 @@ SOURCE_URL: ${meta.source_url || ""}
     console.log(
       `[generate] No relevant content found for industry ${industry.name}, signal ${signal.name}`,
     );
-    const newOffset = batchOffset + 1;
-    await supa
-      .from("pipeline_jobs")
-      .update({
-        current_batch_offset: newOffset,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", job.id);
 
     return NextResponse.json({
       ok: true,
@@ -305,17 +294,12 @@ SOURCE_URL: ${meta.source_url || ""}
     industry_id: industry.id,
     signal_id: signal.id,
     message_text: messageText,
+    delivered_user_ids: [],
   });
 
-  const newOffset = batchOffset + 1;
   const isDone = newOffset >= totalPairs;
 
   console.log(`[generate] Message inserted. Done: ${isDone}`);
-
-  const updateData: any = {
-    current_batch_offset: isDone ? 0 : newOffset,
-    updated_at: new Date().toISOString(),
-  };
 
   if (isDone) {
     const { data: userCount } = await supa
@@ -323,12 +307,18 @@ SOURCE_URL: ${meta.source_url || ""}
       .select("id", { count: "exact", head: true })
       .not("telegram_chat_id", "is", null);
 
-    updateData.status = "sending";
-    updateData.total_items = (userCount as any)?.count || 0;
+    await supa
+      .from("pipeline_jobs")
+      .update({
+        status: "sending",
+        current_batch_offset: 0,
+        total_items: (userCount as any)?.count || 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+
     console.log("[generate] All messages generated, transitioning to sending");
   }
-
-  await supa.from("pipeline_jobs").update(updateData).eq("id", job.id);
 
   return NextResponse.json({
     ok: true,

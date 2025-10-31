@@ -375,6 +375,26 @@
         },
         "effect": "Update config singleton; only provided fields are updated"
     },
+    "/api/admin/jobs": {
+        "method": "POST",
+        "auth": "server-only",
+        "status": "PENDING - Not yet implemented",
+        "actions": {
+            "pause": "Set job status='paused', preserve previous_status for resume",
+            "resume": "Restore job to previous_status, continue from current_batch_offset",
+            "cancel": "Set job status='cancelled', terminal state"
+        },
+        "input": {
+            "action": "pause | resume | cancel",
+            "job_id": "number"
+        },
+        "notes": [
+            "Paused jobs are skipped by cron/advance",
+            "Resume restores the job to its pre-pause state",
+            "Cancel is a terminal state, job cannot be resumed",
+            "May require adding 'previous_status' column to pipeline_jobs table"
+        ]
+    },
     "/api/telegram/send-batch": {
         "method": "POST",
         "auth": "server-only",
@@ -598,6 +618,24 @@ to authenticated using (true);
                     "name": "updated_at",
                     "type": "timestamptz",
                     "default": "now()"
+                },
+                {
+                    "name": "unverified_reason",
+                    "type": "text",
+                    "not_null": false,
+                    "description": "FUTURE: Human-readable reason why profile was unverified (e.g., 'Occupation mismatch')"
+                },
+                {
+                    "name": "unverified_details",
+                    "type": "jsonb",
+                    "not_null": false,
+                    "description": "FUTURE: Structured data showing what changed (old vs new values)"
+                },
+                {
+                    "name": "unverified_at",
+                    "type": "timestamptz",
+                    "not_null": false,
+                    "description": "FUTURE: Timestamp when profile was unverified"
                 }
             ],
             "primary_key": [
@@ -795,6 +833,14 @@ to authenticated using (true);
                     "not_null": true
                 },
                 {
+                    "name": "delivered_user_ids",
+                    "type": "ARRAY",
+                    "element_type_hint": "bigint",
+                    "not_null": true,
+                    "default": "'{}'::bigint[]",
+                    "description": "REQUIRED: Track which users received this message to prevent duplicate sends"
+                },
+                {
                     "name": "created_at",
                     "type": "timestamptz",
                     "default": "now()"
@@ -891,7 +937,7 @@ to authenticated using (true);
             ],
             "notes": [
                 "Tracks daily pipeline state machine progress with batching support",
-                "Status values: 'idle', 'scraping', 'processing', 'vectorizing', 'generating', 'sending', 'completed', 'failed'",
+                "Status values: 'idle', 'scraping', 'processing', 'vectorizing', 'generating', 'sending', 'completed', 'failed', 'paused' (future), 'cancelled' (future)",
                 "admin_chat_ids: Telegram chat IDs to notify on pipeline failure"
             ]
         },
@@ -1036,6 +1082,10 @@ to authenticated using (true);
 idle → scraping → processing → vectorizing → generating → sending → completed
   ↓        ↓           ↓            ↓            ↓           ↓
 failed ←---+----+------+------------+------------+-----------+
+  ↓        ↓           ↓            ↓            ↓           ↓
+paused ←---+----+------+------------+------------+-----------+ (future: can resume to previous state)
+  ↓        ↓           ↓            ↓            ↓           ↓
+cancelled ←+----+------+------------+------------+-----------+ (future: terminal state)
 ```
 
 **Pipeline Stages**:
@@ -1144,6 +1194,55 @@ failed ←---+----+------+------------+------------+-----------+
      - Option 3: Hybrid approach (try sync first, fallback to async)
    - Affected endpoints: /api/links/refresh, /api/links/refresh-one
    - Status: Documented, not yet implemented
+
+7. **Race condition in message generation** (FIXED)
+   - Issue: Multiple cron jobs could generate duplicate messages for same industry-signal pair
+   - Root cause: GPT API calls take 10-30s; next cron job starts before offset is updated
+   - Fix: Update current_batch_offset BEFORE calling GPT (optimistic lock)
+   - Applied in: signals/generate/route.ts:205-214
+   - Result: Each offset processed exactly once, no duplicates
+
+8. **Telegram message bombardment** (FIXED)
+   - Issue: Users received same messages repeatedly every cron run
+   - Root cause: No tracking of which messages were delivered to which users
+   - Fix: Added delivered_user_ids column to messages table (bigint[])
+   - Implementation:
+     - Filter out already-delivered messages before sending (send-batch/route.ts:91)
+     - Record user_id after successful send (send-batch/route.ts:115-121)
+     - Initialize empty array when creating messages (generate/route.ts:302)
+   - Applied in: telegram/send-batch/route.ts, signals/generate/route.ts
+   - Database migration required: ALTER TABLE messages ADD COLUMN delivered_user_ids int8[] DEFAULT '{}'
+   - Result: Each user receives each message exactly once
+
+9. **Add Language option** (PENDING UPDATE)
+10. **Add Signal changing option after registration** (PENDING UPDATE)
+11. **Add Job Control (Pause/Cancel)** (PENDING UPDATE)
+   - Feature: Admin dashboard controls to pause or cancel running pipeline jobs
+   - Implementation: Add pause/cancel buttons in admin UI next to job status
+   - Backend: New endpoint /api/admin/jobs with actions: pause, resume, cancel
+   - Job states: Add 'paused' and 'cancelled' statuses to pipeline_jobs
+   - Behavior:
+     - Pause: Set status='paused', cron advance skips paused jobs
+     - Resume: Restore previous status (scraping/processing/etc), continue from current_batch_offset
+     - Cancel: Set status='cancelled', stop all processing
+   - Use cases: Stop runaway jobs, debug issues, manually control pipeline timing
+
+12. **Add Profile Unverification Tracking** (PENDING UPDATE)
+    - Feature: Track and display why LinkedIn profiles got unverified (allowed=false)
+    - Problem: Currently when occupation/headline mismatch occurs during scraping, profile is silently unverified with no explanation
+    - Implementation:
+      - Add columns to linkedin table:
+        - `unverified_reason` (text): Human-readable explanation (e.g., "Occupation mismatch")
+        - `unverified_details` (jsonb): Structured data with old/new values
+        - `unverified_at` (timestamptz): When it was unverified
+      - Update /api/scrape/process-posts to populate these fields when setting allowed=false
+      - Example details: {"field": "occupation", "expected": "CEO at PASHA Bank", "found": "Managing Director", "timestamp": "2025-10-31T10:30:00Z"}
+    - UI changes:
+      - Show unverified reason in not_allowed list with warning icon
+      - Add tooltip/expandable row showing full details (old vs new values)
+      - Add filter to show recently unverified profiles (last 7 days)
+      - Color-code by reason type (occupation mismatch, headline mismatch, both changed)
+    - Use cases: Debug false positives, understand profile changes, audit verification logic
 
 ------
 

@@ -88,7 +88,8 @@ export async function POST(req: Request) {
     const userMessages = messages.filter(m => {
       const industryMatch = user.industry_ids.includes(m.industry_id);
       const signalMatch = user.signal_ids.includes(m.signal_id);
-      return industryMatch && signalMatch;
+      const alreadyDelivered = m.delivered_user_ids && m.delivered_user_ids.includes(user.id);
+      return industryMatch && signalMatch && !alreadyDelivered;
     });
 
     console.log(`[send-batch] User ${user.id} has ${userMessages.length} matching messages`);
@@ -110,6 +111,15 @@ export async function POST(req: Request) {
 
         if (res.ok) {
           console.log(`[send-batch] Sent message ${msg.id} to user ${user.id}`);
+
+          const currentDeliveredIds = msg.delivered_user_ids || [];
+          await supa
+            .from("messages")
+            .update({
+              delivered_user_ids: [...currentDeliveredIds, user.id],
+            })
+            .eq("id", msg.id);
+
           sent++;
         } else {
           console.error(`[send-batch] Failed to send message ${msg.id} to user ${user.id}:`, res.status);
