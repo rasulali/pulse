@@ -283,7 +283,8 @@
             "  - Extract name with fallbacks",
             "  - Insert into posts with industry_ids from profile",
             "Update pipeline_jobs: increment current_batch_offset",
-            "If done (offset >= total_items): set status='vectorizing', reset offset"
+            "If no eligible posts remain after processing (last 24h ∩ visible industries = 0): mark job completed",
+            "Otherwise, when done (offset >= total_items): advance to vectorizing with remaining post count"
         ],
         "output": {
             "ok": true,
@@ -301,10 +302,12 @@
         "process": [
             "If batch_offset=0: delete all Pinecone vectors (namespace='default')",
             "Fetch posts WHERE created_at >= now()-24h LIMIT batch_size OFFSET batch_offset",
+            "Filter posts to those whose industry_ids intersect visible industries",
             "Generate embeddings via OpenAI (text-embedding-3-small, 1536 dims)",
-            "Build vectors with metadata: {industry_ids, text}",
+            "Build vectors with metadata: {industry_ids (visible only), text}",
             "Upsert to Pinecone namespace='default'",
             "Update pipeline_jobs: increment current_batch_offset",
+            "If no posts after filter: keep namespace cleared, set total_items=0, advance to generating",
             "If done: set status='generating', reset offset"
         ],
         "output": {
@@ -324,11 +327,13 @@
             "Calculate pair at batch_offset: industryIdx = floor(offset/signals.length), signalIdx = offset%signals.length",
             "Generate embedding from signal.embedding_query",
             "Query Pinecone: vector=embedding, topK=10, filter={industry_ids: {$in: [String(industry.id)]}}",
+            "If namespace empty / no matches: return generated=0 and continue",
             "NOTE: industry.id converted to string for Pinecone metadata compatibility",
             "Format context from results",
             "Call GPT-5-mini with signal.prompt as system prompt + userMessage",
             "Insert message into messages table",
             "Update pipeline_jobs: increment current_batch_offset",
+            "If pipeline_jobs.total_items = 0 (no vectors): clear messages, mark job completed early",
             "If done (offset >= total_pairs): set status='sending', count recipients (admins only when config.debug = true), reset offset"
         ],
         "output": {

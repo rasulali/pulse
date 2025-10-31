@@ -238,14 +238,38 @@ FINAL REMINDERS
 
   const index = pinecone.index(process.env.PINECONE_INDEX_NAME!);
 
-  const queryRes = await index.namespace("default").query({
-    vector: embedding,
-    topK: 10,
-    includeMetadata: true,
-    filter: {
-      industry_ids: { $in: [String(industry.id)] },
-    },
-  });
+  let queryRes: any;
+  try {
+    queryRes = await index.namespace("default").query({
+      vector: embedding,
+      topK: 10,
+      includeMetadata: true,
+      filter: {
+        industry_ids: { $in: [String(industry.id)] },
+      },
+    });
+  } catch (error: any) {
+    const message = error?.message || "";
+    const status = error?.status || error?.code;
+    const notFound =
+      status === 404 ||
+      (typeof message === "string" && /not\s+found/i.test(message));
+
+    if (notFound) {
+      console.log(
+        `[generate] Pinecone namespace empty for industry ${industry.name}; skipping`,
+      );
+      return NextResponse.json({
+        ok: true,
+        generated: 0,
+        industry: industry.name,
+        signal: signal.name,
+      });
+    }
+
+    console.error("[generate] Pinecone query failed:", error);
+    throw error;
+  }
 
   if (!queryRes.matches || queryRes.matches.length === 0) {
     console.log(

@@ -47,6 +47,8 @@ export async function POST(req: Request) {
 
   const index = pinecone.index(process.env.PINECONE_INDEX_NAME!);
 
+  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
   if (batchOffset === 0) {
     console.log("[vectorize] First batch - deleting all existing vectors");
     try {
@@ -54,52 +56,102 @@ export async function POST(req: Request) {
       console.log("[vectorize] Vectors deleted");
     } catch (error) {
       console.log(
-        "[vectorize] No vectors to delete (namespace might be empty):",
+        "[vectorize] deleteAll reported (likely empty namespace):",
         error,
       );
     }
   }
 
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: visibleIndustries } = await supa
+    .from("industries")
+    .select("id")
+    .eq("visible", true);
+
+  const visibleIndustryIds = new Set<number>(
+    (visibleIndustries || []).map((row: any) => Number(row.id)).filter(Boolean),
+  );
+
+  if (visibleIndustryIds.size === 0) {
+    console.log("[vectorize] No visible industries; skipping vectorization");
+    await supa
+      .from("pipeline_jobs")
+      .update({
+        status: "generating",
+        current_batch_offset: 0,
+        total_items: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+    return NextResponse.json({ ok: true, vectorized: 0, total_posts: 0 });
+  }
+
+  const visibleIdArray = Array.from(visibleIndustryIds);
+
+  const { data: totalCount } = await supa
+    .from("posts")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", oneDayAgo)
+    .overlaps("industry_ids", visibleIdArray);
+
+  const totalPosts = (totalCount as any)?.count || 0;
 
   const { data: posts } = await supa
     .from("posts")
     .select("*")
     .gte("created_at", oneDayAgo)
+    .overlaps("industry_ids", visibleIdArray)
     .order("created_at", { ascending: false })
     .range(batchOffset, batchOffset + batchSize - 1);
 
-  if (!posts || posts.length === 0) {
-    console.log("[vectorize] No posts to vectorize in this batch");
-
-    const { data: totalCount } = await supa
-      .from("posts")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", oneDayAgo);
-
-    const newOffset = batchOffset + batchSize;
-    const isDone = newOffset >= (totalCount as any)?.count || 0;
-
-    if (isDone) {
-      console.log(
-        "[vectorize] All posts vectorized, transitioning to generating",
+  const filteredPosts =
+    posts?.filter((post: any) => {
+      const industryIds: number[] = Array.isArray(post.industry_ids)
+        ? post.industry_ids.map((id: any) => Number(id))
+        : [];
+      return (
+        industryIds.length > 0 &&
+        industryIds.some((id) => visibleIndustryIds.has(Number(id)))
       );
-      await supa
-        .from("pipeline_jobs")
-        .update({
-          status: "generating",
-          current_batch_offset: 0,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", job.id);
+    }) || [];
+
+  if (filteredPosts.length === 0) {
+    console.log(
+      `[vectorize] No posts found for offset ${batchOffset}; total recent posts = ${totalPosts}`,
+    );
+
+    const reachedEnd = batchOffset >= totalPosts;
+    const nextOffset = reachedEnd
+      ? 0
+      : Math.min(batchOffset + batchSize, totalPosts);
+
+    const updateData: Record<string, unknown> = {
+      current_batch_offset: nextOffset,
+      total_items: totalPosts,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (reachedEnd) {
+      updateData.status = "generating";
+      updateData.current_batch_offset = 0;
+      console.log(
+        "[vectorize] No vectors to build; advancing pipeline to generating",
+      );
     }
 
-    return NextResponse.json({ ok: true, vectorized: 0 });
+    await supa.from("pipeline_jobs").update(updateData).eq("id", job.id);
+
+    return NextResponse.json({
+      ok: true,
+      vectorized: 0,
+      total_posts: totalPosts,
+    });
   }
 
-  console.log(`[vectorize] Vectorizing ${posts.length} posts`);
+  console.log(
+    `[vectorize] Vectorizing ${filteredPosts.length} posts after industry filter`,
+  );
 
-  const texts = posts.map((p) => p.text);
+  const texts = filteredPosts.map((p) => p.text);
 
   const embeddingRes = await openai.embeddings.create({
     model: "text-embedding-3-small",
@@ -107,18 +159,26 @@ export async function POST(req: Request) {
     dimensions: 1536,
   });
 
-  const vectors = posts.map((post, i) => ({
-    id: `post-${post.id}`,
-    values: embeddingRes.data[i].embedding,
-    metadata: {
-      industry_ids: (post.industry_ids || []).map(String),
-      text: post.text,
-      source_url: post.source_url || "",
-      author_url: post.author_url || "",
-      name: post.name || "",
-      title: post.occupation || post.headline || "",
-    },
-  }));
+  const vectors = filteredPosts.map((post, i) => {
+    const industryIds: string[] = Array.isArray(post.industry_ids)
+      ? post.industry_ids
+          .map((id: number) => Number(id))
+          .filter((id: number) => visibleIndustryIds.has(id))
+          .map(String)
+      : [];
+    return {
+      id: `post-${post.id}`,
+      values: embeddingRes.data[i].embedding,
+      metadata: {
+        industry_ids: industryIds,
+        text: post.text,
+        source_url: post.source_url || "",
+        author_url: post.author_url || "",
+        name: post.name || "",
+        title: post.occupation || post.headline || "",
+      },
+    };
+  });
 
   console.log(`[vectorize] Upserting ${vectors.length} vectors to Pinecone`);
   console.log(
@@ -156,17 +216,11 @@ export async function POST(req: Request) {
     throw error;
   }
 
-  const { data: totalCount } = await supa
-    .from("posts")
-    .select("id", { count: "exact", head: true })
-    .gte("created_at", oneDayAgo);
-
-  const totalPosts = (totalCount as any)?.count || 0;
   const newOffset = batchOffset + batchSize;
   const isDone = newOffset >= totalPosts;
 
   console.log(
-    `[vectorize] Batch complete. Vectorized: ${posts.length}, Done: ${isDone}`,
+    `[vectorize] Batch complete. Vectorized: ${vectors.length}, Done: ${isDone}`,
   );
 
   const updateData: any = {
@@ -184,5 +238,5 @@ export async function POST(req: Request) {
 
   await supa.from("pipeline_jobs").update(updateData).eq("id", job.id);
 
-  return NextResponse.json({ ok: true, vectorized: posts.length });
+  return NextResponse.json({ ok: true, vectorized: vectors.length });
 }

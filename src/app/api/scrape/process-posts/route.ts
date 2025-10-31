@@ -302,10 +302,48 @@ export async function POST(req: Request) {
   };
 
   if (isDone) {
-    updateData.status = "vectorizing";
-    console.log(
-      "[process-posts] All posts processed, transitioning to vectorizing",
-    );
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+    const { data: visibleIndustries } = await supa
+      .from("industries")
+      .select("id")
+      .eq("visible", true);
+
+    const visibleIds = (visibleIndustries || [])
+      .map((row: any) => Number(row.id))
+      .filter((id) => Number.isFinite(id));
+
+    if (visibleIds.length === 0) {
+      console.log(
+        "[process-posts] No visible industries remain; marking job completed",
+      );
+      updateData.status = "completed";
+      updateData.current_batch_offset = 0;
+      updateData.total_items = 0;
+    } else {
+      const { data: recentCount } = await supa
+        .from("posts")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", cutoff)
+        .overlaps("industry_ids", visibleIds);
+
+      const remaining = (recentCount as any)?.count || 0;
+
+      if (remaining === 0) {
+        console.log(
+          "[process-posts] No eligible posts remain after processing; marking job completed",
+        );
+        updateData.status = "completed";
+        updateData.current_batch_offset = 0;
+        updateData.total_items = 0;
+      } else {
+        updateData.status = "vectorizing";
+        updateData.total_items = remaining;
+        console.log(
+          `[process-posts] Processing complete; ${remaining} posts ready for vectorization`,
+        );
+      }
+    }
   }
 
   await supa.from("pipeline_jobs").update(updateData).eq("id", job.id);
