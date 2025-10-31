@@ -12,7 +12,12 @@ export async function POST() {
   const supa = sadmin();
   const { data, error } = await supa
     .from("linkedin")
-    .update({ allowed: true })
+    .update({
+      allowed: true,
+      unverified_reason: null,
+      unverified_details: null,
+      unverified_at: null,
+    })
     .eq("allowed", false)
     .select("id");
   if (error) return NextResponse.json({ ok: false }, { status: 500 });

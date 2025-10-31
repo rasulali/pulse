@@ -76,24 +76,56 @@ export async function POST() {
     );
   }
 
-  const { data: rows } = await supa
-    .from("linkedin")
-    .select("url")
-    .eq("allowed", true);
+  const { data: visibleIndustries } = await supa
+    .from("industries")
+    .select("id")
+    .eq("visible", true);
 
-  const urls = (rows || []).map((r: any) => r.url).filter(Boolean);
+  const visibleIndustryIds = new Set<number>(
+    (visibleIndustries || []).map((row: any) => Number(row.id)).filter(Boolean),
+  );
 
-  if (!urls.length) {
-    const errorMsg = "No allowed URLs found";
-    console.log("[verify-and-run]", errorMsg);
+  if (visibleIndustryIds.size === 0) {
+    const errorMsg = "No visible industries configured";
+    console.error("[verify-and-run]", errorMsg);
     await notifyAdmins(supa, errorMsg);
     return NextResponse.json(
-      { ok: false, error: "No allowed URLs" },
+      { ok: false, error: "No visible industries" },
       { status: 400 },
     );
   }
 
-  console.log(`[verify-and-run] Found ${urls.length} allowed URLs`);
+  const { data: rows } = await supa
+    .from("linkedin")
+    .select("url,industry_ids")
+    .eq("allowed", true);
+
+  const allowedVisibleProfiles =
+    rows?.filter((row: any) => {
+      const industries: number[] = Array.isArray(row.industry_ids)
+        ? row.industry_ids.map((id: any) => Number(id))
+        : [];
+      return (
+        industries.length > 0 &&
+        industries.some((id) => visibleIndustryIds.has(id))
+      );
+    }) || [];
+
+  const urls = allowedVisibleProfiles.map((r: any) => r.url).filter(Boolean);
+
+  if (!urls.length) {
+    const errorMsg = "No allowed URLs found for visible industries";
+    console.log("[verify-and-run]", errorMsg);
+    await notifyAdmins(supa, errorMsg);
+    return NextResponse.json(
+      { ok: false, error: "No allowed URLs for visible industries" },
+      { status: 400 },
+    );
+  }
+
+  console.log(
+    `[verify-and-run] Found ${urls.length} allowed URLs across visible industries`,
+  );
 
   const payload = {
     cookie: cfg.cookie_default,

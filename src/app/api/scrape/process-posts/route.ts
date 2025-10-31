@@ -119,6 +119,7 @@ export async function POST(req: Request) {
   }
 
   const items = (await datasetRes.json()) as ApifyItem[];
+  const runStartedAt = runInfo.data?.startedAt || job.started_at;
 
   console.log(`[process-posts] Fetched ${items.length} items from dataset`);
 
@@ -128,7 +129,8 @@ export async function POST(req: Request) {
   const now = Date.now();
   const oneDayAgo = now - 24 * 60 * 60 * 1000;
 
-  for (const item of items) {
+  for (const [idx, item] of items.entries()) {
+    const globalIndex = batchOffset + idx;
     const profileUrl = norm(
       item?.inputUrl ||
         item?.authorProfileUrl ||
@@ -174,9 +176,27 @@ export async function POST(req: Request) {
       console.log(
         `[process-posts] Occupation mismatch for ${profileUrl}: "${profile.occupation}" != "${occupation}"`,
       );
+      const detectedAt = new Date().toISOString();
+      const details = {
+        field: "occupation",
+        stored_value: profile.occupation,
+        stored_value_normalized: profileOccupation,
+        scraped_value: occupation,
+        scraped_value_normalized: occupation,
+        pipeline_job_id: job.id,
+        apify_run_id: job.apify_run_id,
+        apify_run_started_at: runStartedAt,
+        dataset_id: datasetId,
+        dataset_index: globalIndex,
+      };
       await supa
         .from("linkedin")
-        .update({ allowed: false })
+        .update({
+          allowed: false,
+          unverified_reason: "Occupation mismatch",
+          unverified_details: details,
+          unverified_at: detectedAt,
+        })
         .eq("id", profile.id);
       skipped++;
       continue;
@@ -186,9 +206,27 @@ export async function POST(req: Request) {
       console.log(
         `[process-posts] Headline mismatch for ${profileUrl}: "${profile.headline}" != "${headline}"`,
       );
+      const detectedAt = new Date().toISOString();
+      const details = {
+        field: "headline",
+        stored_value: profile.headline,
+        stored_value_normalized: profileHeadline,
+        scraped_value: headline,
+        scraped_value_normalized: headline,
+        pipeline_job_id: job.id,
+        apify_run_id: job.apify_run_id,
+        apify_run_started_at: runStartedAt,
+        dataset_id: datasetId,
+        dataset_index: globalIndex,
+      };
       await supa
         .from("linkedin")
-        .update({ allowed: false })
+        .update({
+          allowed: false,
+          unverified_reason: "Headline mismatch",
+          unverified_details: details,
+          unverified_at: detectedAt,
+        })
         .eq("id", profile.id);
       skipped++;
       continue;

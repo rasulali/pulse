@@ -234,8 +234,9 @@
         "input": "none",
         "process": [
             "Fetch config singleton",
-            "Fetch linkedin WHERE allowed=true",
-            "Build Apify payload with profile URLs",
+            "Fetch industries WHERE visible=true; bail if none",
+            "Fetch linkedin WHERE allowed=true AND industry_ids intersect visible industries",
+            "Build Apify payload with filtered profile URLs",
             "Start ASYNC Apify run (returns run_id immediately)",
             "Create pipeline_jobs row with status='scraping', apify_run_id"
         ],
@@ -275,7 +276,7 @@
             "  - Extract profile URL, find linkedin profile",
             "  - Extract occupation/headline with fallbacks; normalize (NFKC, remove zero-width, collapse whitespace)",
             "  - Verify: if profile.occupation exists, compare normalized strings; if profile.headline exists, compare normalized strings",
-            "  - If mismatch: set allowed=false, skip",
+            "  - If mismatch: set allowed=false, capture unverified_reason/details/unverified_at (diff + run metadata), skip",
             "  - Check URN exists in posts (deduplicate)",
             "  - Filter posts older than 24h",
             "  - Clean text (emojis, control chars, whitespace)",
@@ -626,19 +627,19 @@ to authenticated using (true);
                     "name": "unverified_reason",
                     "type": "text",
                     "not_null": false,
-                    "description": "FUTURE: Human-readable reason why profile was unverified (e.g., 'Occupation mismatch')"
+                    "description": "Human-readable reason why profile was unverified (e.g., 'Occupation mismatch')"
                 },
                 {
                     "name": "unverified_details",
                     "type": "jsonb",
                     "not_null": false,
-                    "description": "FUTURE: Structured data showing what changed (old vs new values)"
+                    "description": "Structured data showing what changed (stored vs scraped values, run metadata)"
                 },
                 {
                     "name": "unverified_at",
                     "type": "timestamptz",
                     "not_null": false,
-                    "description": "FUTURE: Timestamp when profile was unverified"
+                    "description": "Timestamp when the pipeline flipped allowed=false"
                 }
             ],
             "primary_key": [
@@ -1237,22 +1238,10 @@ cancelled ←+----+------+------------+------------+-----------+ (future: termin
      - Cancel: Set status='cancelled', stop all processing
    - Use cases: Stop runaway jobs, debug issues, manually control pipeline timing
 
-12. **Add Profile Unverification Tracking** (PENDING UPDATE)
-    - Feature: Track and display why LinkedIn profiles got unverified (allowed=false)
-    - Problem: Currently when occupation/headline mismatch occurs during scraping, profile is silently unverified with no explanation
-    - Implementation:
-      - Add columns to linkedin table:
-        - `unverified_reason` (text): Human-readable explanation (e.g., "Occupation mismatch")
-        - `unverified_details` (jsonb): Structured data with old/new values
-        - `unverified_at` (timestamptz): When it was unverified
-      - Update /api/scrape/process-posts to populate these fields when setting allowed=false
-      - Example details: {"field": "occupation", "expected": "CEO at PASHA Bank", "found": "Managing Director", "timestamp": "2025-10-31T10:30:00Z"}
-    - UI changes:
-      - Show unverified reason in not_allowed list with warning icon
-      - Add tooltip/expandable row showing full details (old vs new values)
-      - Add filter to show recently unverified profiles (last 7 days)
-      - Color-code by reason type (occupation mismatch, headline mismatch, both changed)
-    - Use cases: Debug false positives, understand profile changes, audit verification logic
+12. **Profile unverification tracking & diff** (COMPLETED)
+    - Pipeline writes `unverified_reason`, `unverified_details`, and `unverified_at` whenever occupation/headline mismatches are detected (includes stored vs scraped values, run ID, dataset index).
+    - Admin dashboard renders a git-style diff between stored and scraped values plus run metadata (e.g., "31 Oct 2025 · Run xyz") inside the Not Allowed table.
+    - Allowing a profile again clears unverification metadata so future mismatches can be tracked cleanly.
 
 ------
 
@@ -1315,7 +1304,7 @@ cancelled ←+----+------+------------+------------+-----------+ (future: termin
 {
   "lists": {
     "allowed": "linkedin.allowed = true, sorted by name; items with missing secondary text (occupation/headline) float to top with orange flag",
-    "not_allowed": "linkedin.allowed = false"
+    "not_allowed": "linkedin.allowed = false; shows an unverification panel with run date/ID and a git diff between stored and scraped values when available"
   },
   "actions": {
     "per_item": ["Refresh one", "Move -> / <-", "Open profile (name is a link)", "Delete one"],

@@ -40,6 +40,9 @@ type Row = {
   headline: string | null;
   industry_ids: number[];
   allowed?: boolean;
+  unverified_reason?: string | null;
+  unverified_details?: Record<string, any> | null;
+  unverified_at?: string | null;
 };
 
 type Industry = { id: number; name: string; visible?: boolean };
@@ -76,6 +79,31 @@ const secondary = (o: string | null, h: string | null) => {
   if (validOcc) return oo;
   if (validHead) return hh;
   return "";
+};
+
+const formatShortDate = (iso?: string | null) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(d);
+};
+
+const formatDiffBlock = (stored?: string | null, scraped?: string | null) => {
+  const a = (stored ?? "").trim();
+  const b = (scraped ?? "").trim();
+  if (!a && !b) return null;
+  if (a === b) return null;
+  const safe = (value: string) => (value ? value : " ");
+  return [
+    `--- Stored value`,
+    `+++ Scraped value`,
+    `- ${safe(a)}`,
+    `+ ${safe(b)}`,
+  ].join("\n");
 };
 
 export default function Page() {
@@ -162,7 +190,8 @@ export default function Page() {
   };
 
   const loadLists = async () => {
-    const cols = "id,name,url,occupation,headline,allowed,industry_ids";
+    const cols =
+      "id,name,url,occupation,headline,allowed,industry_ids,unverified_reason,unverified_details,unverified_at";
     const { data: A } = await supabase
       .from("linkedin")
       .select(cols)
@@ -558,9 +587,9 @@ export default function Page() {
             {savingConfig ? (
               <FiRefreshCw className="w-4 h-4 animate-spin" />
             ) : debugMode ? (
-              <PiPlugsConnected className="w-4 h-4" />
-            ) : (
               <PiPlugs className="w-4 h-4" />
+            ) : (
+              <PiPlugsConnected className="w-4 h-4" />
             )}
             <span className="truncate">{debugLabel}</span>
           </button>
@@ -1726,8 +1755,42 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                     )}
                     {selectionValid &&
                       filteredR.map((x) => {
-                        const sec = secondary(x.occupation, x.headline);
                         const isLoading = loadingIds.has(x.id);
+                        const details =
+                          (x.unverified_details as Record<string, any> | null) ||
+                          null;
+                        const reason = x.unverified_reason || null;
+                        const unverifiedDateText = formatShortDate(
+                          x.unverified_at || null,
+                        );
+                        const runId =
+                          typeof details?.apify_run_id === "number"
+                            ? String(details.apify_run_id)
+                            : (details?.apify_run_id as string) ||
+                              (details?.apifyRunId
+                                ? String(details.apifyRunId)
+                                : null);
+                        const storedValue =
+                          (details?.stored_value as string | null | undefined) ??
+                          x.occupation ??
+                          x.headline ??
+                          null;
+                        const scrapedValue =
+                          (details?.scraped_value as string | null | undefined) ??
+                          (details?.scraped_value_normalized as
+                            | string
+                            | null
+                            | undefined) ??
+                          null;
+                        const diffBlock = formatDiffBlock(
+                          storedValue ?? null,
+                          scrapedValue ?? null,
+                        );
+                        const metaBits = [
+                          unverifiedDateText,
+                          runId ? `Run ${runId}` : null,
+                        ].filter((bit): bit is string => !!bit && bit.length > 0);
+                        const panelTitle = "Unverified";
                         return (
                           <tr
                             key={x.id}
@@ -1743,10 +1806,32 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                                 {x.name || x.url}
                               </a>
                             </td>
-                            <td className="px-6 py-4">
-                              <p className="text-sm text-neutral-600 line-clamp-2">
-                                {sec || "—"}
-                              </p>
+                            <td className="px-6 py-4 align-top">
+                              {reason || diffBlock ? (
+                                <div className="rounded border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 shadow-sm">
+                                  <div className="font-semibold">
+                                    {panelTitle}
+                                  </div>
+                                  {metaBits.length > 0 && (
+                                    <div className="mt-1 text-[11px] text-amber-800">
+                                      {metaBits.join(" · ")}
+                                    </div>
+                                  )}
+                                  {diffBlock ? (
+                                    <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-snug text-amber-900">
+                                      {diffBlock}
+                                    </pre>
+                                  ) : (
+                                    <p className="mt-2 text-[11px]">
+                                      No differing value captured.
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-neutral-500">
+                                  No unverification metadata recorded.
+                                </p>
+                              )}
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex items-center justify-end gap-2">
