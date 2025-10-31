@@ -25,6 +25,7 @@ import {
   FiX,
 } from "react-icons/fi";
 import { IoToggle } from "react-icons/io5";
+import { PiPlugs, PiPlugsConnected } from "react-icons/pi";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -63,6 +64,7 @@ type ConfigData = {
   limit_per_source: number;
   memory_mbytes: number;
   cookie_default: any;
+  debug: boolean;
 };
 
 const rx = /[A-Za-z\u00C0-\u024F\u0400-\u04FF]/u;
@@ -279,6 +281,13 @@ export default function Page() {
     setSaveConfigConfirm(false);
   };
 
+  const toggleDebugMode = async () => {
+    if (!config || savingConfig) return;
+    const next = !config.debug;
+    setConfig({ ...config, debug: next });
+    await handleConfigUpdate({ debug: next });
+  };
+
   const updateLinkIndustries = async () => {
     if (editingIndustryIds.length === 0 || !editIndustriesModal.row) return;
     setUpdatingIndustries(true);
@@ -484,6 +493,12 @@ export default function Page() {
   if (!user) return null;
 
   const viewAllowed = flaggedSortedAllowed;
+  const debugMode = !!config?.debug;
+  const debugLabel = config ? (debugMode ? "Debug" : "Prod") : "Mode";
+  const debugButtonClasses = debugMode
+    ? "bg-amber-600 hover:bg-amber-700"
+    : "bg-green-600 hover:bg-green-700";
+  const debugButtonDisabled = !config || savingConfig;
 
   return (
     <main className="min-h-dvh bg-neutral-50">
@@ -534,6 +549,20 @@ export default function Page() {
           >
             <FiSend className="w-4 h-4" />
             <span className="truncate">Run Pipeline</span>
+          </button>
+          <button
+            disabled={debugButtonDisabled}
+            onClick={toggleDebugMode}
+            className={`cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2 text-sm rounded-md text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${debugButtonClasses}`}
+          >
+            {savingConfig ? (
+              <FiRefreshCw className="w-4 h-4 animate-spin" />
+            ) : debugMode ? (
+              <PiPlugsConnected className="w-4 h-4" />
+            ) : (
+              <PiPlugs className="w-4 h-4" />
+            )}
+            <span className="truncate">{debugLabel}</span>
           </button>
 
           <div className="flex-1 flex gap-2">

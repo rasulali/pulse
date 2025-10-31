@@ -17,12 +17,26 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json() as { limit_per_source?: number; cookie_default?: any };
-  const { limit_per_source, cookie_default } = body;
+  const body = await req.json() as {
+    limit_per_source?: number;
+    cookie_default?: any;
+    memory_mbytes?: number;
+    debug?: boolean;
+  };
 
-  const updateData: any = {};
-  if (limit_per_source !== undefined) updateData.limit_per_source = limit_per_source;
-  if (cookie_default !== undefined) updateData.cookie_default = cookie_default;
+  const updateData: Record<string, unknown> = {};
+  if (body.limit_per_source !== undefined) {
+    updateData.limit_per_source = body.limit_per_source;
+  }
+  if (body.cookie_default !== undefined) {
+    updateData.cookie_default = body.cookie_default;
+  }
+  if (body.memory_mbytes !== undefined) {
+    updateData.memory_mbytes = body.memory_mbytes;
+  }
+  if (body.debug !== undefined) {
+    updateData.debug = body.debug;
+  }
 
   const { data, error } = await supabase
     .from("config")

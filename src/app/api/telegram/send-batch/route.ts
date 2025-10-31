@@ -19,6 +19,16 @@ export async function POST(req: Request) {
 
   const supa = sadmin();
 
+  const { data: configRow } = await supa
+    .from("config")
+    .select("debug")
+    .eq("singleton", true)
+    .single();
+
+  const debugMode = !!configRow?.debug;
+
+  console.log(`[send-batch] Debug mode is ${debugMode ? "ENABLED" : "disabled"}`);
+
   const { data: job } = await supa
     .from("pipeline_jobs")
     .select("*")
@@ -53,18 +63,61 @@ export async function POST(req: Request) {
 
   console.log(`[send-batch] Found ${messages.length} messages for today`);
 
-  const { data: users } = await supa
+  let recipientsCountQuery = supa
+    .from("users")
+    .select("id", { count: "exact", head: true })
+    .not("telegram_chat_id", "is", null);
+
+  if (debugMode) {
+    recipientsCountQuery = recipientsCountQuery.eq("is_admin", true);
+  }
+
+  const { count: recipientCount } = await recipientsCountQuery;
+  const totalRecipients = recipientCount || 0;
+
+  if (job.total_items !== totalRecipients) {
+    console.log(`[send-batch] Updating total_items from ${job.total_items} to ${totalRecipients}`);
+    await supa
+      .from("pipeline_jobs")
+      .update({
+        total_items: totalRecipients,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+  }
+
+  if (totalRecipients === 0) {
+    console.log('[send-batch] No recipients for current mode, completing job');
+    await supa
+      .from("pipeline_jobs")
+      .update({
+        status: 'completed',
+        current_batch_offset: 0,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+    return NextResponse.json({ ok: true, sent: 0 });
+  }
+
+  let usersQuery = supa
     .from("users")
     .select("*")
-    .not("telegram_chat_id", "is", null)
-    .order("id")
+    .not("telegram_chat_id", "is", null);
+
+  if (debugMode) {
+    usersQuery = usersQuery.eq("is_admin", true);
+  }
+
+  usersQuery = usersQuery.order("id");
+
+  const { data: users } = await usersQuery
     .range(batchOffset, batchOffset + batchSize - 1);
 
   if (!users || users.length === 0) {
     console.log('[send-batch] No users in this batch');
 
-    const newOffset = batchOffset + batchSize;
-    const isDone = newOffset >= job.total_items;
+    const newOffset = Math.min(batchOffset + batchSize, totalRecipients);
+    const isDone = newOffset >= totalRecipients;
 
     if (isDone) {
       console.log('[send-batch] All messages sent, transitioning to completed');
@@ -130,8 +183,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const newOffset = batchOffset + batchSize;
-  const isDone = newOffset >= job.total_items;
+  const newOffset = Math.min(batchOffset + batchSize, totalRecipients);
+  const isDone = newOffset >= totalRecipients;
 
   console.log(`[send-batch] Batch complete. Sent: ${sent}, Done: ${isDone}`);
 

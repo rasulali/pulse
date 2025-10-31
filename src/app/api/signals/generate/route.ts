@@ -28,6 +28,16 @@ export async function POST(req: Request) {
 
   const supa = sadmin();
 
+  const { data: configRow } = await supa
+    .from("config")
+    .select("debug")
+    .eq("singleton", true)
+    .single();
+
+  const debugMode = !!configRow?.debug;
+
+  console.log(`[generate] Debug mode is ${debugMode ? "ENABLED" : "disabled"}`);
+
   const { data: job } = await supa
     .from("pipeline_jobs")
     .select("*")
@@ -173,17 +183,24 @@ FINAL REMINDERS
   if (batchOffset >= totalPairs) {
     console.log("[generate] All messages generated, transitioning to sending");
 
-    const { data: userCount } = await supa
+    let recipientsQuery = supa
       .from("users")
       .select("id", { count: "exact", head: true })
       .not("telegram_chat_id", "is", null);
+
+    if (debugMode) {
+      recipientsQuery = recipientsQuery.eq("is_admin", true);
+    }
+
+    const { count: recipientCount } = await recipientsQuery;
+    const totalRecipients = recipientCount || 0;
 
     await supa
       .from("pipeline_jobs")
       .update({
         status: "sending",
         current_batch_offset: 0,
-        total_items: (userCount as any)?.count || 0,
+        total_items: totalRecipients,
         updated_at: new Date().toISOString(),
       })
       .eq("id", job.id);

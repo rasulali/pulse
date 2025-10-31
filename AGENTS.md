@@ -328,7 +328,7 @@
             "Call GPT-5-mini with signal.prompt as system prompt + userMessage",
             "Insert message into messages table",
             "Update pipeline_jobs: increment current_batch_offset",
-            "If done (offset >= total_pairs): set status='sending', count users, reset offset"
+            "If done (offset >= total_pairs): set status='sending', count recipients (admins only when config.debug = true), reset offset"
         ],
         "output": {
             "ok": true,
@@ -371,7 +371,9 @@
         "auth": "server-only",
         "input": {
             "limit_per_source": "number (optional)",
-            "cookie_default": "jsonb (optional)"
+            "cookie_default": "jsonb (optional)",
+            "memory_mbytes": "number (optional)",
+            "debug": "boolean (optional)"
         },
         "effect": "Update config singleton; only provided fields are updated"
     },
@@ -404,7 +406,8 @@
         },
         "process": [
             "Fetch today's messages",
-            "Fetch 10 users WHERE telegram_chat_id IS NOT NULL LIMIT 10 OFFSET batch_offset",
+            "Fetch recipients with telegram_chat_id (admins only when config.debug = true) LIMIT batch_size OFFSET batch_offset",
+            "Sync pipeline_jobs.total_items with current recipient count",
             "For each user: filter messages by industry_ids AND signal_ids",
             "Send via Telegram API with parse_mode='HTML'",
             "Update pipeline_jobs: increment current_batch_offset",
@@ -709,6 +712,13 @@ to authenticated using (true);
                     "not_null": true,
                     "default": "512",
                     "description": "Memory allocation in MB for Apify actor runs"
+                },
+                {
+                    "name": "debug",
+                    "type": "boolean",
+                    "not_null": true,
+                    "default": "false",
+                    "description": "When true, Telegram pipeline sends only to admins"
                 },
                 {
                     "name": "singleton",
@@ -1324,8 +1334,13 @@ cancelled ←+----+------+------------+------------+-----------+ (future: termin
       "actions": ["Toggle Admin (add/remove from pipeline_jobs.admin_chat_ids)", "Delete"]
     },
     "config": {
-      "fields": ["limit_per_source (number)", "memory_mbytes (number)", "cookie_default (JSON textarea)"],
-      "action": "Save Config button"
+      "fields": [
+        "limit_per_source (number)",
+        "memory_mbytes (number)",
+        "cookie_default (JSON textarea)",
+        "Debug mode toggle (PiPlugs button: amber=Debug/admin-only send, green=Prod/send to all)"
+      ],
+      "action": "Save Config button (numeric/JSON fields) + instant debug toggle"
     },
     "industries": {
       "columns": ["Name", "Visible toggle button (right-aligned, green when visible)", "Edit", "Delete"],
