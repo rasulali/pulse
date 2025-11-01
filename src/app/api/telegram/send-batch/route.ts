@@ -138,11 +138,13 @@ export async function POST(req: Request) {
   let sent = 0;
 
   for (const user of users) {
+    const userLanguages = (user as any).languages || [user.language || "en"];
     const userMessages = messages.filter(m => {
       const industryMatch = user.industry_ids.includes(m.industry_id);
       const signalMatch = user.signal_ids.includes(m.signal_id);
+      const languageMatch = userLanguages.includes(m.language || "en");
       const alreadyDelivered = m.delivered_user_ids && m.delivered_user_ids.includes(user.id);
-      return industryMatch && signalMatch && !alreadyDelivered;
+      return industryMatch && signalMatch && languageMatch && !alreadyDelivered;
     });
 
     console.log(`[send-batch] User ${user.id} has ${userMessages.length} matching messages`);

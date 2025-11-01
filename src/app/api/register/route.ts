@@ -7,6 +7,7 @@ type Payload = {
   lastName?: string;
   industryIds: number[];
   signalIds: number[];
+  language?: string;
 };
 
 export async function POST(req: Request) {
@@ -39,6 +40,7 @@ export async function POST(req: Request) {
     }
 
     const token = crypto.randomUUID();
+    const userLanguage = b.language || "en";
     const { error: insErr } = await supabase.from("users").insert([
       {
         email,
@@ -46,6 +48,7 @@ export async function POST(req: Request) {
         last_name: b.lastName ?? null,
         industry_ids: b.industryIds,
         signal_ids: b.signalIds,
+        languages: [userLanguage],
         telegram_start_token: token,
       },
     ]);

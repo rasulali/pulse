@@ -24,7 +24,6 @@ import {
   FiUsers,
   FiX,
 } from "react-icons/fi";
-import { IoToggle } from "react-icons/io5";
 import { PiPlugs, PiPlugsConnected } from "react-icons/pi";
 
 const supabase = createClient(
@@ -57,7 +56,10 @@ type AppUser = {
   first_name: string | null;
   last_name: string | null;
   telegram_chat_id: number | null;
-  is_admin?: boolean;
+  is_admin: boolean;
+  industry_ids: number[];
+  signal_ids: number[];
+  languages: string[];
   created_at: string;
 };
 type ConfigData = {
@@ -146,6 +148,27 @@ export default function Page() {
   const [deletingSignalId, setDeletingSignalId] = useState<number | null>(null);
   const [saveConfigConfirm, setSaveConfigConfirm] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [editUserModal, setEditUserModal] = useState<{
+    open: boolean;
+    user:
+      | (AppUser & {
+          industry_ids: number[];
+          signal_ids: number[];
+          language?: string;
+        })
+      | null;
+    industryIds: number[];
+    signalIds: number[];
+    languages: string[];
+    isAdmin: boolean;
+  }>({
+    open: false,
+    user: null,
+    industryIds: [],
+    signalIds: [],
+    languages: [],
+    isAdmin: false,
+  });
   const [editIndustriesModal, setEditIndustriesModal] = useState<{
     open: boolean;
     row?: Row;
@@ -288,6 +311,31 @@ export default function Page() {
       body: JSON.stringify({ action, id }),
     });
     await loadAdminUsers();
+  };
+
+  const saveUserEdit = async () => {
+    if (!editUserModal.user) return;
+    await fetch("/api/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "update",
+        id: editUserModal.user.id,
+        industryIds: editUserModal.industryIds,
+        signalIds: editUserModal.signalIds,
+        languages: editUserModal.languages,
+        isAdmin: editUserModal.isAdmin,
+      }),
+    });
+    await loadAdminUsers();
+    setEditUserModal({
+      open: false,
+      user: null,
+      industryIds: [],
+      signalIds: [],
+      languages: [],
+      isAdmin: false,
+    });
   };
 
   const handleConfigUpdate = async (updates: Partial<ConfigData>) => {
@@ -1014,47 +1062,64 @@ export default function Page() {
                 <tbody className="divide-y divide-neutral-100">
                   {[...users]
                     .sort((a, b) => (b.is_admin ? 1 : 0) - (a.is_admin ? 1 : 0))
-                    .map((u) => (
-                      <tr
-                        key={u.id}
-                        className="hover:bg-neutral-50 transition-colors"
-                      >
-                        <td className="px-6 py-4 text-sm text-neutral-900">
-                          {u.email}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-neutral-600">
-                          {[u.first_name, u.last_name]
-                            .filter(Boolean)
-                            .join(" ") || "—"}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-neutral-600">
-                          {u.telegram_chat_id || "—"}
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center justify-end gap-2">
-                            {u.telegram_chat_id && (
+                    .map((u) => {
+                      const isDisabled = !u.is_admin && debugMode;
+
+                      return (
+                        <tr
+                          key={u.id}
+                          className={`${
+                            isDisabled
+                              ? "opacity-50 bg-neutral-50"
+                              : "hover:bg-neutral-50"
+                          } transition-colors`}
+                        >
+                          <td className="px-6 py-4 text-sm text-neutral-900">
+                            {u.email}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-neutral-600">
+                            {[u.first_name, u.last_name]
+                              .filter(Boolean)
+                              .join(" ") || "—"}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-neutral-600">
+                            {u.telegram_chat_id || "—"}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center justify-end gap-2">
+                              {
+                                <span className="flex gap-x-1">
+                                  {u.languages.map((lang) => (
+                                    <span key={lang}>{lang}</span>
+                                  ))}
+                                </span>
+                              }
                               <button
-                                onClick={() => handleUser("toggle-admin", u.id)}
-                                className={`flex gap-x-2 items-center cursor-pointer py-1.5 text-xs
-font-medium
-${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
+                                onClick={() =>
+                                  setEditUserModal({
+                                    open: true,
+                                    user: u as any,
+                                    industryIds: u.industry_ids || [],
+                                    signalIds: u.signal_ids || [],
+                                    languages: u.languages || [],
+                                    isAdmin: u.is_admin || false,
+                                  })
+                                }
+                                className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
                               >
-                                {u.is_admin && "admin"}
-                                <IoToggle
-                                  className={`w-6 h-6 ${!u.is_admin && "rotate-180"}`}
-                                />
+                                <FiEdit2 className="w-3.5 h-3.5" />
                               </button>
-                            )}
-                            <button
-                              onClick={() => handleUser("delete", u.id)}
-                              className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
-                            >
-                              <FiTrash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                              <button
+                                onClick={() => handleUser("delete", u.id)}
+                                className="cursor-pointer inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50"
+                              >
+                                <FiTrash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -1482,6 +1547,221 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {editUserModal.open && editUserModal.user && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white border border-neutral-200 rounded-lg shadow-xl max-w-xl w-full p-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-semibold text-neutral-900">
+                Edit User:{" "}
+                <span
+                  className={`${editUserModal.user.is_admin && "text-green-600"}`}
+                >
+                  {editUserModal.user.first_name +
+                    " " +
+                    editUserModal.user.last_name}
+                </span>
+              </h2>
+              <button
+                onClick={() =>
+                  setEditUserModal({
+                    open: false,
+                    user: null,
+                    industryIds: [],
+                    signalIds: [],
+                    languages: [],
+                    isAdmin: false,
+                  })
+                }
+              >
+                <FiX className="cursor-pointer w-5 h-5 text-neutral-500 hover:text-neutral-700" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
+                  Industries
+                </label>
+                <div className="space-y-1 max-h-32 overflow-y-auto border border-neutral-200 rounded p-2">
+                  {industries.map((ind) => (
+                    <label
+                      key={ind.id}
+                      className="flex items-center gap-2 cursor-pointer hover:bg-neutral-50 px-2 py-1 rounded"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editUserModal.industryIds.includes(ind.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditUserModal({
+                              ...editUserModal,
+                              industryIds: [
+                                ...editUserModal.industryIds,
+                                ind.id,
+                              ],
+                            });
+                          } else {
+                            setEditUserModal({
+                              ...editUserModal,
+                              industryIds: editUserModal.industryIds.filter(
+                                (id) => id !== ind.id,
+                              ),
+                            });
+                          }
+                        }}
+                        className="w-3.5 h-3.5"
+                      />
+                      <span className="text-sm">{ind.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
+                  Signals
+                </label>
+                <div className="space-y-1 max-h-32 overflow-y-auto border border-neutral-200 rounded p-2">
+                  {signals.map((sig) => (
+                    <label
+                      key={sig.id}
+                      className="flex items-center gap-2 cursor-pointer hover:bg-neutral-50 px-2 py-1 rounded"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editUserModal.signalIds.includes(sig.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditUserModal({
+                              ...editUserModal,
+                              signalIds: [...editUserModal.signalIds, sig.id],
+                            });
+                          } else {
+                            setEditUserModal({
+                              ...editUserModal,
+                              signalIds: editUserModal.signalIds.filter(
+                                (id) => id !== sig.id,
+                              ),
+                            });
+                          }
+                        }}
+                        className="w-3.5 h-3.5"
+                      />
+                      <span className="text-sm">{sig.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1.5">
+                  Languages
+                </label>
+                <div className="flex gap-2">
+                  {[
+                    { code: "en", name: "English" },
+                    { code: "az", name: "Azerbaijani" },
+                    { code: "ru", name: "Russian" },
+                  ].map((lang) => (
+                    <label
+                      key={lang.code}
+                      className="flex items-center gap-1.5 cursor-pointer hover:bg-neutral-50 px-3 py-1.5 rounded border border-neutral-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editUserModal.languages.includes(lang.code)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditUserModal({
+                              ...editUserModal,
+                              languages: [
+                                ...editUserModal.languages,
+                                lang.code,
+                              ],
+                            });
+                          } else {
+                            setEditUserModal({
+                              ...editUserModal,
+                              languages: editUserModal.languages.filter(
+                                (c) => c !== lang.code,
+                              ),
+                            });
+                          }
+                        }}
+                        className="w-3.5 h-3.5"
+                      />
+                      <span className="text-sm">{lang.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {editUserModal.user?.telegram_chat_id && (
+                <div className="border border-neutral-200 rounded p-3 bg-neutral-50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="block text-xs font-semibold text-neutral-900">
+                        Admin Access
+                      </label>
+                      <p className="text-xs text-neutral-600 mt-0.5">
+                        Grant administrative privileges
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditUserModal({
+                          ...editUserModal,
+                          isAdmin: !editUserModal.isAdmin,
+                        })
+                      }
+                      className={`relative inline-flex items-center cursor-pointer h-5 w-9 rounded-full transition-colors ${
+                        editUserModal.isAdmin
+                          ? "bg-green-600"
+                          : "bg-neutral-300"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block w-3.5 h-3.5 transform rounded-full bg-white transition-transform ${
+                          editUserModal.isAdmin
+                            ? "translate-x-4.5"
+                            : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditUserModal({
+                      open: false,
+                      user: null,
+                      industryIds: [],
+                      signalIds: [],
+                      languages: [],
+                      isAdmin: false,
+                    })
+                  }
+                  className="cursor-pointer px-4 py-1.5 text-sm rounded border border-neutral-300 hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveUserEdit}
+                  className="cursor-pointer px-4 py-1.5 text-sm rounded bg-neutral-900 text-white hover:bg-neutral-800"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

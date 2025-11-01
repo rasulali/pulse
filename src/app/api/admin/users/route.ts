@@ -18,7 +18,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json() as { action: string; id: number };
+  const body = await req.json() as {
+    action: string;
+    id: number;
+    industryIds?: number[];
+    signalIds?: number[];
+    languages?: string[];
+    isAdmin?: boolean;
+  };
   const { action, id } = body;
 
   if (action === "delete") {
@@ -47,6 +54,43 @@ export async function POST(req: NextRequest) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true, is_admin: newIsAdmin });
+  }
+
+  if (action === "update") {
+    const updateData: {
+      industry_ids?: number[];
+      signal_ids?: number[];
+      languages?: string[];
+      is_admin?: boolean;
+    } = {};
+
+    if (body.industryIds !== undefined) {
+      updateData.industry_ids = body.industryIds;
+    }
+
+    if (body.signalIds !== undefined) {
+      updateData.signal_ids = body.signalIds;
+    }
+
+    if (body.languages !== undefined) {
+      if (body.languages.length > 0) {
+        updateData.languages = body.languages;
+      } else {
+        updateData.languages = ["en"];
+      }
+    }
+
+    if (body.isAdmin !== undefined) {
+      updateData.is_admin = body.isAdmin;
+    }
+
+    const { error } = await supabase
+      .from("users")
+      .update(updateData)
+      .eq("id", id);
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
   }
 
   return NextResponse.json({ error: "Invalid action" }, { status: 400 });

@@ -18,6 +18,12 @@ const pinecone = new Pinecone({
   apiKey: process.env.PINECONE_API_KEY!,
 });
 
+const languageNames: Record<string, string> = {
+  en: "English",
+  az: "Azerbaijani",
+  ru: "Russian",
+};
+
 export async function POST(req: Request) {
   console.log("[generate] Starting message generation");
 
@@ -38,6 +44,31 @@ export async function POST(req: Request) {
 
   console.log(`[generate] Debug mode is ${debugMode ? "ENABLED" : "disabled"}`);
 
+  let activeLanguagesQuery = supa
+    .from("users")
+    .select("languages")
+    .not("telegram_chat_id", "is", null);
+
+  if (debugMode) {
+    activeLanguagesQuery = activeLanguagesQuery.eq("is_admin", true);
+  }
+
+  const { data: languageRows } = await activeLanguagesQuery;
+
+  const activeLanguages = Array.from(
+    new Set(
+      (languageRows || [])
+        .flatMap((row) => row.languages || [])
+        .filter((lang): lang is string => !!lang && lang.trim() !== ""),
+    ),
+  );
+
+  if (activeLanguages.length === 0) {
+    activeLanguages.push("en");
+  }
+
+  console.log(`[generate] Active languages: ${activeLanguages.join(", ")}`);
+
   const { data: job } = await supa
     .from("pipeline_jobs")
     .select("*")
@@ -54,7 +85,13 @@ export async function POST(req: Request) {
     );
   }
 
-  const systemPrompt = `You are an AI assistant that analyzes professional business content and generates concise insights with source attribution.
+  const getSystemPrompt = (targetLanguage: string) => {
+    const languageName = languageNames[targetLanguage] || targetLanguage;
+    return `You are an AI assistant that analyzes professional business content and generates concise insights with source attribution.
+
+LANGUAGE REQUIREMENT
+Generate all narrative text in ${languageName}; do not translate or modify any text inside <b>…</b> tags (headings/labels/titles)—keep it original.
+The source content may be in various languages - translate the relevant information into ${languageName}.
 
 CONTEXT FORMAT
 The CONTEXT contains multiple numbered excerpts. Each excerpt is structured as:
@@ -93,7 +130,7 @@ If you *do* find relevant content and you are NOT returning NO_CONTENT:
 
 - Use <b>...</b> for headers, titles, and key findings.
 - Use <i>...</i> for clearly stated or clearly implied impact (opportunity, risk, strategic significance).
-- Use "- " for bullet points and normal line breaks to separate items.
+- Use "• " for bullet points and normal line breaks to separate items.
 - Use <a href="AUTHOR_URL">AUTHOR_NAME</a> for clickable author names (use full name from AUTHOR field).
 - Use source numbers [N] from the context for citations (e.g., "Source 1", "Source 2").
 - Do NOT use Markdown or tables.
@@ -112,11 +149,13 @@ STRUCTURE
 Follow the specific structure and requirements provided in the QUERY. The QUERY will tell you exactly what to extract and how to format it.
 
 FINAL REMINDERS
+- Generate everything in ${languageName}.
 - NEVER invent or guess missing details.
 - ALWAYS include source attribution with numbered links.
 - Use author names as clickable HTML links: <a href="AUTHOR_URL">AUTHOR_NAME</a>
 - If there is nothing relevant to the QUERY signal, output ONLY: NO_CONTENT
 `;
+  };
 
   const { data: industries } = await supa
     .from("industries")
@@ -150,10 +189,11 @@ FINAL REMINDERS
     );
   }
 
-  const totalPairs = industries.length * validSignals.length;
+  const totalPairs =
+    industries.length * validSignals.length * activeLanguages.length;
 
   console.log(
-    `[generate] Total pairs: ${totalPairs}, current offset: ${batchOffset}`,
+    `[generate] Total combinations (industries × signals × languages): ${totalPairs}, current offset: ${batchOffset}`,
   );
 
   if (batchOffset === 0) {
@@ -208,13 +248,18 @@ FINAL REMINDERS
     return NextResponse.json({ ok: true, generated: 0 });
   }
 
-  const industryIdx = Math.floor(batchOffset / validSignals.length);
-  const signalIdx = batchOffset % validSignals.length;
+  const signalsPerIndustry = validSignals.length * activeLanguages.length;
+  const industryIdx = Math.floor(batchOffset / signalsPerIndustry);
+  const pairIdx = batchOffset % signalsPerIndustry;
+  const signalIdx = Math.floor(pairIdx / activeLanguages.length);
+  const languageIdx = pairIdx % activeLanguages.length;
+
   const industry = industries[industryIdx];
   const signal = validSignals[signalIdx];
+  const language = activeLanguages[languageIdx];
 
   console.log(
-    `[generate] Processing industry: ${industry.name}, signal: ${signal.name}`,
+    `[generate] Processing industry: ${industry.name}, signal: ${signal.name}, language: ${language}`,
   );
 
   const newOffset = batchOffset + 1;
@@ -264,6 +309,7 @@ FINAL REMINDERS
         generated: 0,
         industry: industry.name,
         signal: signal.name,
+        language: language,
       });
     }
 
@@ -281,6 +327,7 @@ FINAL REMINDERS
       generated: 0,
       industry: industry.name,
       signal: signal.name,
+      language: language,
     });
   }
 
@@ -306,6 +353,8 @@ SOURCE_URL: ${meta.source_url || ""}
 
   const userMessage = `CONTEXT:\n${context}\n\nQUERY: ${signal.prompt}`;
 
+  const systemPrompt = getSystemPrompt(language);
+
   const completion = await openai.chat.completions.create({
     model: "gpt-5-mini",
     messages: [
@@ -326,6 +375,7 @@ SOURCE_URL: ${meta.source_url || ""}
       generated: 0,
       industry: industry.name,
       signal: signal.name,
+      language: language,
     });
   }
 
@@ -334,6 +384,7 @@ SOURCE_URL: ${meta.source_url || ""}
   await supa.from("messages").insert({
     industry_id: industry.id,
     signal_id: signal.id,
+    language: language,
     message_text: messageText,
     delivered_user_ids: [],
   });
@@ -366,5 +417,6 @@ SOURCE_URL: ${meta.source_url || ""}
     generated: 1,
     industry: industry.name,
     signal: signal.name,
+    language: language,
   });
 }

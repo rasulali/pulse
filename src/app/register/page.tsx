@@ -12,6 +12,12 @@ import { BiLogoTelegram } from "react-icons/bi";
 
 type Option = { id: number; name: string };
 
+const languageNames: Record<string, string> = {
+  en: "English",
+  az: "Azərbaycan",
+  ru: "Русский",
+};
+
 const sb = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!,
@@ -59,11 +65,14 @@ export default function RegisterPage() {
   const [signalOpts, setSignalOpts] = useState<Option[]>([]);
   const [industryIds, setIndustryIds] = useState<number[]>([]);
   const [signalIds, setSignalIds] = useState<number[]>([]);
+  const [language, setLanguage] = useState("en");
 
   const [openInd, setOpenInd] = useState(false);
   const [openSig, setOpenSig] = useState(false);
+  const [openLang, setOpenLang] = useState(false);
   const indRef = useRef<HTMLDivElement>(null);
   const sigRef = useRef<HTMLDivElement>(null);
+  const langRef = useRef<HTMLDivElement>(null);
 
   const [loading, setLoading] = useState(false);
   const [telegramLink, setTelegramLink] = useState<string | null>(null);
@@ -117,9 +126,12 @@ export default function RegisterPage() {
         setOpenInd(false);
       if (sigRef.current && !sigRef.current.contains(e.target as Node))
         setOpenSig(false);
+      if (langRef.current && !langRef.current.contains(e.target as Node))
+        setOpenLang(false);
     };
     const esc = (e: KeyboardEvent) =>
-      e.key === "Escape" && (setOpenInd(false), setOpenSig(false));
+      e.key === "Escape" &&
+      (setOpenInd(false), setOpenSig(false), setOpenLang(false));
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", esc);
     return () => {
@@ -153,6 +165,7 @@ export default function RegisterPage() {
           lastName,
           industryIds,
           signalIds,
+          language,
         }),
       });
       const data: { telegramLink?: string; error?: string } = await r.json();
@@ -227,6 +240,44 @@ export default function RegisterPage() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="your.email@gmail.com"
             />
+          </div>
+
+          <div className="space-y-2" ref={langRef}>
+            <label className="block text-sm font-semibold text-black">
+              Language
+            </label>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setOpenLang(!openLang)}
+                className="w-full bg-white rounded-lg py-2.5 px-4 text-left text-black shadow-[inset_4px_4px_8px_#e6e6e6,inset_-4px_-4px_8px_#ffffff] flex items-center justify-between"
+              >
+                <span className="text-gray-500">{languageNames[language]}</span>
+                <IoChevronDown
+                  className={`w-5 h-5 transition-transform ${openLang ? "rotate-180" : ""}`}
+                />
+              </button>
+              {openLang && (
+                <div className="absolute mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg z-20">
+                  <ul className="py-2 text-sm text-black">
+                    {(["en", "az", "ru"] as const).map((lang) => (
+                      <li key={lang}>
+                        <button
+                          type="button"
+                          className={`w-full text-left px-4 py-2 hover:bg-gray-50 ${language === lang ? "bg-gray-100 font-medium" : ""}`}
+                          onClick={() => {
+                            setLanguage(lang);
+                            setOpenLang(false);
+                          }}
+                        >
+                          {languageNames[lang]}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

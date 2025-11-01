@@ -191,12 +191,13 @@
             "firstName": "string?",
             "lastName": "string?",
             "industryIds": "number[] (bigint[])",
-            "signalIds": "number[] (bigint[])"
+            "signalIds": "number[] (bigint[])",
+            "language": "string? (defaults to 'en', stored in languages array)"
         },
         "process": [
             "Validate payload; normalize email lower/trim",
             "Check duplicate by lower(email)",
-            "Insert users row with generated telegram_start_token",
+            "Insert users row with generated telegram_start_token and languages=[language || 'en']",
             "Return Telegram deep link = https://t.me/${NEXT_PUBLIC_TELEGRAM_BOT_USERNAME}?start=${token}"
         ],
         "success": {
@@ -208,7 +209,8 @@
             "500 db failure"
         ],
         "notes": [
-            "Does NOT create a Supabase auth user"
+            "Does NOT create a Supabase auth user",
+            "Language parameter is stored as single-element array in languages column"
         ]
     },
     "/api/tg/webhook": {
@@ -326,14 +328,17 @@
         "process": [
             "Fetch industries WHERE visible=true",
             "Fetch signals WHERE visible=true",
-            "Calculate pair at batch_offset: industryIdx = floor(offset/signals.length), signalIdx = offset%signals.length",
+            "Fetch active languages from users with telegram_chat_id (distinct languages from languages array)",
+            "Calculate triplet at batch_offset: industryIdx, signalIdx, languageIdx using modulo arithmetic",
+            "Total pairs = industries.length × signals.length × active_languages.length",
             "Generate embedding from signal.embedding_query",
             "Query Pinecone: vector=embedding, topK=10, filter={industry_ids: {$in: [String(industry.id)]}}",
             "If namespace empty / no matches: return generated=0 and continue",
             "NOTE: industry.id converted to string for Pinecone metadata compatibility",
-            "Format context from results",
-            "Call GPT-5-mini with signal.prompt as system prompt + userMessage",
-            "Insert message into messages table",
+            "Format context from results with source URLs",
+            "Build system prompt with language-specific instructions (English, Azerbaijani, Russian)",
+            "Call GPT-5-mini with language-aware system prompt + signal.prompt + context",
+            "Insert message into messages table with language field and delivered_user_ids=[]",
             "Update pipeline_jobs: increment current_batch_offset",
             "If pipeline_jobs.total_items = 0 (no vectors): clear messages, mark job completed early",
             "If done (offset >= total_pairs): set status='sending', count recipients (admins only when config.debug = true), reset offset"
@@ -369,9 +374,17 @@
         "method": "GET | POST",
         "auth": "server-only",
         "actions": {
-            "GET": "Fetch all users with is_admin flag (from pipeline_jobs.admin_chat_ids)",
+            "GET": "Fetch all users with is_admin flag",
             "delete": "Delete user by id",
-            "toggle-admin": "Add/remove user's telegram_chat_id from pipeline_jobs.admin_chat_ids"
+            "toggle-admin": "Toggle is_admin flag for user",
+            "update": "Update user's industry_ids, signal_ids, languages array, and is_admin flag"
+        },
+        "update_input": {
+            "id": "number",
+            "industryIds": "number[] (optional)",
+            "signalIds": "number[] (optional)",
+            "languages": "string[] (optional, defaults to ['en'] if empty)",
+            "isAdmin": "boolean (optional)"
         }
     },
     "/api/admin/config": {
@@ -416,8 +429,10 @@
             "Fetch today's messages",
             "Fetch recipients with telegram_chat_id (admins only when config.debug = true) LIMIT batch_size OFFSET batch_offset",
             "Sync pipeline_jobs.total_items with current recipient count",
-            "For each user: filter messages by industry_ids AND signal_ids",
+            "For each user: filter messages by industry_ids AND signal_ids AND languages",
+            "Skip messages where user.id is in message.delivered_user_ids (prevent duplicates)",
             "Send via Telegram API with parse_mode='HTML'",
+            "Record user.id in message.delivered_user_ids after successful send",
             "Update pipeline_jobs: increment current_batch_offset",
             "If done: set status='completed'"
         ],
@@ -845,6 +860,13 @@ to authenticated using (true);
                     "not_null": true
                 },
                 {
+                    "name": "language",
+                    "type": "varchar",
+                    "not_null": true,
+                    "default": "'en'::character varying",
+                    "description": "Language code for this message (en, az, ru)"
+                },
+                {
                     "name": "delivered_user_ids",
                     "type": "ARRAY",
                     "element_type_hint": "bigint",
@@ -1063,6 +1085,19 @@ to authenticated using (true);
                     "not_null": false
                 },
                 {
+                    "name": "is_admin",
+                    "type": "boolean",
+                    "not_null": true,
+                    "default": "false"
+                },
+                {
+                    "name": "languages",
+                    "type": "ARRAY",
+                    "element_type_hint": "text",
+                    "not_null": true,
+                    "default": "ARRAY['en'::text]"
+                },
+                {
                     "name": "created_at",
                     "type": "timestamptz",
                     "not_null": false,
@@ -1073,7 +1108,7 @@ to authenticated using (true);
                 "id"
             ],
             "notes": [
-                "industry_ids/signal_ids are intended as bigint[]; RAW_DDL currently shows generic ARRAY."
+                "industry_ids/signal_ids/languages are typed arrays (bigint[], bigint[], text[] respectively)"
             ]
         }
     ]
@@ -1128,21 +1163,26 @@ cancelled ←+----+------+------------+------------+-----------+ (future: termin
    - Transitions to: generating
 
 5. **generating** (batch: 1 message)
-   - For each (industry, signal) pair:
+   - For each (industry, signal, language) combination:
+     - Determines active languages from users with telegram_chat_id set
      - Generates embedding from signal.embedding_query
      - Queries Pinecone with semantic search (topK=10)
      - Filter: industry_ids contains String(industry_id)
      - Formats context with URLs: TEXT, AUTHOR, AUTHOR_URL, SOURCE_URL per post
-     - Calls GPT-5-mini to generate message with structured context
+     - Calls GPT-5-mini to generate message in target language with structured context
+     - System prompt instructs GPT to generate entire response in target language (English, Azerbaijani, Russian)
      - GPT output includes: clickable author names, "Sources:" section with post links
-     - Inserts HTML-formatted message into messages table
+     - Inserts HTML-formatted message into messages table with language field
+   - Total combinations: industries × signals × active_languages
    - NOTE: Rerank removed (Node.js SDK v6 doesn't support it)
    - Transitions to: sending
 
 6. **sending** (batch: 10 users)
    - Fetches today's messages
-   - Filters messages by user's industry_ids AND signal_ids
+   - Filters messages by user's industry_ids AND signal_ids AND languages
+   - Skips messages already delivered to user (via delivered_user_ids)
    - Sends via Telegram API (parse_mode: HTML)
+   - Records user_id in message.delivered_user_ids after successful send
    - Transitions to: completed
 
 **Error Handling**:
@@ -1226,8 +1266,29 @@ cancelled ←+----+------+------------+------------+-----------+ (future: termin
    - Database migration required: ALTER TABLE messages ADD COLUMN delivered_user_ids int8[] DEFAULT '{}'
    - Result: Each user receives each message exactly once
 
-9. **Add Language option** (PENDING UPDATE)
-10. **Add Signal changing option after registration** (PENDING UPDATE)
+9. **Add Language option** (PARTIALLY COMPLETED)
+   - Feature: Users can select language during registration and admins can edit via admin panel
+   - Implementation: languages column (text[]) in users table, defaults to ['en']
+   - Admin UI: Edit user modal allows selecting multiple languages (English, Azerbaijani, Russian)
+   - Registration UI: Full-width language selector with readable names (English, Azərbaycan, Русский)
+   - API: /api/register accepts language parameter, /api/admin/users update action handles languages array
+   - Applied in: register/route.ts, admin/users/route.ts, page.tsx, register/page.tsx
+   - PENDING: User self-service via Telegram commands (see #10)
+
+10. **User Self-Service Preferences via Telegram** (PENDING IMPLEMENTATION)
+   - Feature: Allow users to update their signals, industries, and languages after registration via Telegram bot commands
+   - Implementation required:
+     - Telegram bot command handlers: /settings, /industries, /signals, /languages
+     - Interactive inline keyboards for multi-select options
+     - Update users table (industry_ids, signal_ids, languages) based on Telegram chat_id
+     - Confirmation messages after successful updates
+   - User flow:
+     1. User sends /settings command to bot
+     2. Bot shows current preferences with inline keyboard buttons
+     3. User selects new industries/signals/languages
+     4. Bot updates database and confirms changes
+   - Benefits: Users can manage preferences without admin intervention
+   - Affected files: New handler in /api/tg/webhook/route.ts or new endpoint /api/tg/commands/route.ts
 11. **Add Job Control (Pause/Cancel)** (PENDING UPDATE)
    - Feature: Admin dashboard controls to pause or cancel running pipeline jobs
    - Implementation: Add pause/cancel buttons in admin UI next to job status
@@ -1321,8 +1382,17 @@ cancelled ←+----+------+------------+------------+-----------+ (future: termin
   "admin_config": {
     "layout": "2-column grid: Users (left) | Config/Industries/Signals (right, stacked)",
     "users": {
-      "columns": ["Email", "Name", "Chat ID", "Admin badge", "Actions"],
-      "actions": ["Toggle Admin (add/remove from pipeline_jobs.admin_chat_ids)", "Delete"]
+      "columns": ["Email", "Name", "Chat ID", "Actions"],
+      "actions": [
+        "Edit (modal to update industry_ids, signal_ids, languages, is_admin toggle)",
+        "Delete"
+      ],
+      "edit_modal_fields": [
+        "Industries (multi-select checkboxes)",
+        "Signals (multi-select checkboxes)",
+        "Languages (multi-select: English, Azerbaijani, Russian)",
+        "Admin Access (toggle switch, only shown if user has telegram_chat_id)"
+      ]
     },
     "config": {
       "fields": [
@@ -1376,6 +1446,8 @@ CREATE TABLE public.users (
   signal_ids ARRAY NOT NULL,
   telegram_start_token text NOT NULL,
   telegram_chat_id bigint,
+  is_admin boolean NOT NULL DEFAULT false,
+  languages ARRAY DEFAULT ARRAY['en'::text],
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT users_pkey PRIMARY KEY (id)
 );
