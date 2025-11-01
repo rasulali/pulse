@@ -1,1 +1,0 @@
-- run 'pnpm tsc --noEmit' command after typescript changes to make sure there is no type errors
