@@ -37,10 +37,8 @@ type Row = {
   name: string | null;
   url: string;
   occupation: string | null;
-  headline: string | null;
   industry_ids: number[];
   allowed?: boolean;
-  unverified_reason?: string | null;
   unverified_details?: Record<string, any> | null;
   unverified_at?: string | null;
 };
@@ -70,17 +68,6 @@ type ConfigData = {
   debug: boolean;
 };
 
-const rx = /[A-Za-z\u00C0-\u024F\u0400-\u04FF]/u;
-const secondary = (o: string | null, h: string | null) => {
-  const oo = (o || "").trim();
-  const hh = (h || "").trim();
-  const validOcc = !!(oo && rx.test(oo));
-  const validHead = !validOcc && !!(hh && rx.test(hh));
-  if (validOcc) return oo;
-  if (validHead) return hh;
-  return "";
-};
-
 const formatShortDate = (iso?: string | null) => {
   if (!iso) return null;
   const d = new Date(iso);
@@ -90,20 +77,6 @@ const formatShortDate = (iso?: string | null) => {
     month: "short",
     year: "numeric",
   }).format(d);
-};
-
-const formatDiffBlock = (stored?: string | null, scraped?: string | null) => {
-  const a = (stored ?? "").trim();
-  const b = (scraped ?? "").trim();
-  if (!a && !b) return null;
-  if (a === b) return null;
-  const safe = (value: string) => (value ? value : " ");
-  return [
-    `--- Stored value`,
-    `+++ Scraped value`,
-    `- ${safe(a)}`,
-    `+ ${safe(b)}`,
-  ].join("\n");
 };
 
 export default function Page() {
@@ -131,6 +104,21 @@ export default function Page() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
   const [config, setConfig] = useState<ConfigData | null>(null);
+  const [unverifiedModal, setUnverifiedModal] = useState<{
+    open: boolean;
+    payload: {
+      row: Row;
+      detectedAtLabel: string | null;
+      detectedAtIso: string | null;
+      pipelineJobId: string | null;
+      runId: string | null;
+      storedDisplay: string;
+      scrapedDisplay: string;
+      storedRaw: string | null;
+      scrapedRaw: string | null;
+      details: Record<string, any> | null;
+    } | null;
+  }>({ open: false, payload: null });
 
   const [industryModal, setIndustryModal] = useState<{
     open: boolean;
@@ -164,6 +152,10 @@ export default function Page() {
   }>({ open: false });
   const [editingIndustryIds, setEditingIndustryIds] = useState<number[]>([]);
   const [updatingIndustries, setUpdatingIndustries] = useState(false);
+  const unverifiedPayload = unverifiedModal.payload;
+
+  const closeUnverifiedModal = () =>
+    setUnverifiedModal({ open: false, payload: null });
 
   useEffect(() => {
     let mounted = true;
@@ -191,7 +183,7 @@ export default function Page() {
 
   const loadLists = async () => {
     const cols =
-      "id,name,url,occupation,headline,allowed,industry_ids,unverified_reason,unverified_details,unverified_at";
+      "id,name,url,occupation,allowed,industry_ids,unverified_details,unverified_at";
     const { data: A } = await supabase
       .from("linkedin")
       .select(cols)
@@ -367,7 +359,7 @@ export default function Page() {
   const flaggedSortedAllowed = useMemo(() => {
     const withFlag = L.filter(matchInds).map((x) => ({
       ...x,
-      flag: !secondary(x.occupation, x.headline),
+      flag: !(x.occupation || "").trim(),
     }));
     withFlag.sort(
       (a, b) =>
@@ -804,6 +796,192 @@ export default function Page() {
             </div>
           </div>
         </section>
+      )}
+
+      {unverifiedModal.open && unverifiedPayload && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-neutral-200">
+              <div>
+                <h2 className="text-lg font-semibold text-neutral-900">
+                  Unverified Details
+                </h2>
+                <p className="text-sm text-neutral-600 mt-0.5">
+                  {unverifiedPayload.row.name ||
+                    unverifiedPayload.row.url ||
+                    "LinkedIn Profile"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeUnverifiedModal}
+                className="cursor-pointer text-neutral-400 hover:text-neutral-600 focus:outline-none rounded p-1 transition-colors"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="overflow-y-auto px-6 py-5">
+              {/* Table */}
+              <div className="border border-neutral-200 rounded overflow-hidden">
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-neutral-200">
+                    <tr>
+                      <td className="px-4 py-2.5 text-neutral-600 font-medium w-1/3">
+                        Stored Value
+                      </td>
+                      <td className="px-4 py-2.5 text-neutral-900">
+                        {unverifiedPayload.storedRaw ||
+                          unverifiedPayload.storedDisplay ||
+                          "—"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                        Scraped Value
+                      </td>
+                      <td className="px-4 py-2.5 text-neutral-900">
+                        {unverifiedPayload.scrapedRaw ||
+                          unverifiedPayload.scrapedDisplay ||
+                          "—"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                        Detected At
+                      </td>
+                      <td className="px-4 py-2.5 text-neutral-900 font-mono">
+                        {(() => {
+                          const dateStr =
+                            unverifiedPayload.detectedAtIso ||
+                            unverifiedPayload.detectedAtLabel;
+                          if (!dateStr) return "—";
+                          try {
+                            return new Date(dateStr).toLocaleString("en-US", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              hour12: false,
+                            });
+                          } catch {
+                            return dateStr;
+                          }
+                        })()}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                        Job ID
+                      </td>
+                      <td className="px-4 py-2.5 text-neutral-900 font-mono">
+                        {unverifiedPayload.pipelineJobId || "—"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                        Run ID
+                      </td>
+                      <td className="px-4 py-2.5 text-neutral-900 font-mono break-all">
+                        {unverifiedPayload.runId || "—"}
+                      </td>
+                    </tr>
+
+                    {unverifiedPayload.details && (
+                      <>
+                        {"stored_value_normalized" in
+                          unverifiedPayload.details && (
+                          <tr>
+                            <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                              Stored (normalized)
+                            </td>
+                            <td className="px-4 py-2.5 text-neutral-900 font-mono">
+                              {String(
+                                unverifiedPayload.details
+                                  ?.stored_value_normalized ?? "",
+                              ) || "—"}
+                            </td>
+                          </tr>
+                        )}
+                        {"scraped_value_normalized" in
+                          unverifiedPayload.details && (
+                          <tr>
+                            <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                              Scraped (normalized)
+                            </td>
+                            <td className="px-4 py-2.5 text-neutral-900 font-mono">
+                              {String(
+                                unverifiedPayload.details
+                                  ?.scraped_value_normalized ?? "",
+                              ) || "—"}
+                            </td>
+                          </tr>
+                        )}
+                        {"dataset_id" in unverifiedPayload.details && (
+                          <tr>
+                            <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                              Dataset ID
+                            </td>
+                            <td className="px-4 py-2.5 text-neutral-900 font-mono break-all">
+                              {String(
+                                unverifiedPayload.details?.dataset_id || "—",
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                        {"dataset_index" in unverifiedPayload.details && (
+                          <tr>
+                            <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                              Dataset Index
+                            </td>
+                            <td className="px-4 py-2.5 text-neutral-900 font-mono">
+                              {String(
+                                unverifiedPayload.details?.dataset_index || "—",
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                        {"apify_run_started_at" in
+                          unverifiedPayload.details && (
+                          <tr>
+                            <td className="px-4 py-2.5 text-neutral-600 font-medium">
+                              Run Started At
+                            </td>
+                            <td className="px-4 py-2.5 text-neutral-900 font-mono">
+                              {(() => {
+                                const dateStr =
+                                  unverifiedPayload.details
+                                    ?.apify_run_started_at;
+                                if (!dateStr) return "—";
+                                try {
+                                  return new Date(
+                                    String(dateStr),
+                                  ).toLocaleString("en-US", {
+                                    day: "2-digit",
+                                    month: "short",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hour12: false,
+                                  });
+                                } catch {
+                                  return String(dateStr);
+                                }
+                              })()}
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       <section className="mx-auto max-w-[1600px] px-6 py-4">
@@ -1596,7 +1774,7 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                     )}
                     {selectionValid &&
                       viewAllowed.map((x) => {
-                        const sec = secondary(x.occupation, x.headline);
+                        const sec = (x.occupation || "").trim();
                         const flag = !sec;
                         const isLoading = loadingIds.has(x.id);
                         return (
@@ -1604,8 +1782,8 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                             key={x.id}
                             className="hover:bg-neutral-50 transition-colors"
                           >
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2">
+                            <td className="px-6 py-4 align-middle">
+                              <div className="flex min-h-[72px] items-center gap-2">
                                 <a
                                   href={x.url}
                                   target="_blank"
@@ -1615,22 +1793,21 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                                   {x.name || x.url}
                                 </a>
                                 {flag && (
-                                  <FiAlertTriangle
-                                    className="w-4 h-4 text-amber-500 flex-shrink-0"
-                                    title="Missing info"
-                                  />
+                                  <FiAlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0" />
                                 )}
                               </div>
                             </td>
-                            <td className="px-6 py-4">
-                              <p
-                                className={`text-sm  line-clamp-2 ${flag ? "text-amber-500 font-medium" : "text-neutral-600"}`}
-                              >
-                                {sec || "Unverifiable"}
-                              </p>
+                            <td className="px-6 py-4 align-middle">
+                              <div className="flex min-h-[72px] flex-col justify-center">
+                                <p
+                                  className={`text-sm line-clamp-2 ${flag ? "text-amber-500 font-medium" : "text-neutral-600"}`}
+                                >
+                                  {sec || "Unverifiable"}
+                                </p>
+                              </div>
                             </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center justify-end gap-2">
+                            <td className="px-6 py-4 align-middle">
+                              <div className="flex min-h-[72px] items-center justify-end gap-2">
                                 <button
                                   disabled={tableFrozen || busy}
                                   onClick={() => {
@@ -1643,7 +1820,6 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                                     ]);
                                   }}
                                   className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
-                                  title="Edit industries"
                                 >
                                   <FiTag className="w-3.5 h-3.5" />
                                 </button>
@@ -1757,9 +1933,12 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                       filteredR.map((x) => {
                         const isLoading = loadingIds.has(x.id);
                         const details =
-                          (x.unverified_details as Record<string, any> | null) ||
-                          null;
-                        const reason = x.unverified_reason || null;
+                          (x.unverified_details as Record<
+                            string,
+                            any
+                          > | null) || null;
+                        const sec = (x.occupation || "").trim();
+                        const flag = !sec;
                         const unverifiedDateText = formatShortDate(
                           x.unverified_at || null,
                         );
@@ -1771,70 +1950,151 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                                 ? String(details.apifyRunId)
                                 : null);
                         const storedValue =
-                          (details?.stored_value as string | null | undefined) ??
-                          x.occupation ??
-                          x.headline ??
-                          null;
+                          typeof details?.stored_value === "string"
+                            ? details?.stored_value
+                            : typeof details?.stored_value_normalized ===
+                                "string"
+                              ? details?.stored_value_normalized
+                              : null;
                         const scrapedValue =
-                          (details?.scraped_value as string | null | undefined) ??
-                          (details?.scraped_value_normalized as
-                            | string
-                            | null
-                            | undefined) ??
-                          null;
-                        const diffBlock = formatDiffBlock(
-                          storedValue ?? null,
-                          scrapedValue ?? null,
-                        );
-                        const metaBits = [
+                          typeof details?.scraped_value === "string"
+                            ? details?.scraped_value
+                            : typeof details?.scraped_value_normalized ===
+                                "string"
+                              ? details?.scraped_value_normalized
+                              : null;
+                        const unverifiedInfo = {
+                          runId,
                           unverifiedDateText,
-                          runId ? `Run ${runId}` : null,
-                        ].filter((bit): bit is string => !!bit && bit.length > 0);
-                        const panelTitle = "Unverified";
+                          storedValue,
+                          scrapedValue,
+                          details,
+                        };
+                        const storedRaw = (unverifiedInfo.storedValue || "")
+                          .toString()
+                          .trim();
+                        const scrapedRaw = (unverifiedInfo.scrapedValue || "")
+                          .toString()
+                          .trim();
+                        const storedDisplay =
+                          storedRaw.length > 0 ? storedRaw : "—";
+                        const scrapedDisplay =
+                          scrapedRaw.length > 0 ? scrapedRaw : "—";
+                        const pipelineJobId = unverifiedInfo.details
+                          ?.pipeline_job_id
+                          ? String(unverifiedInfo.details.pipeline_job_id)
+                          : null;
+                        const metaLine = [
+                          unverifiedInfo.unverifiedDateText
+                            ? `Date : ${unverifiedInfo.unverifiedDateText}`
+                            : null,
+                          pipelineJobId ? `job : ${pipelineJobId}` : null,
+                          unverifiedInfo.runId
+                            ? `run : ${unverifiedInfo.runId}`
+                            : null,
+                        ].filter(
+                          (bit): bit is string => !!bit && bit.length > 0,
+                        );
+                        const hasUnverifiedTimestamp =
+                          typeof x.unverified_at === "string" &&
+                          x.unverified_at.length > 0;
+                        const hasDetailPayload =
+                          !!details && Object.keys(details).length > 0;
+                        const isManualOverride = !(
+                          hasUnverifiedTimestamp || hasDetailPayload
+                        );
+                        const hasMetadata =
+                          storedRaw.length > 0 ||
+                          scrapedRaw.length > 0 ||
+                          metaLine.length > 0 ||
+                          hasDetailPayload;
+                        const detectedAtIso = x.unverified_at || null;
+                        const openUnverifiedModal = () => {
+                          setUnverifiedModal({
+                            open: true,
+                            payload: {
+                              row: x,
+                              detectedAtLabel:
+                                unverifiedInfo.unverifiedDateText || null,
+                              detectedAtIso,
+                              pipelineJobId,
+                              runId: unverifiedInfo.runId || null,
+                              storedDisplay,
+                              scrapedDisplay,
+                              storedRaw: storedRaw || null,
+                              scrapedRaw: scrapedRaw || null,
+                              details,
+                            },
+                          });
+                        };
                         return (
                           <tr
                             key={x.id}
                             className="hover:bg-neutral-50 transition-colors"
                           >
-                            <td className="px-6 py-4">
-                              <a
-                                href={x.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-sm font-medium text-neutral-900 hover:text-neutral-600 transition-colors"
+                            <td className="px-6 py-4 align-middle">
+                              <div className="flex min-h-[72px] items-center">
+                                <a
+                                  href={x.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm font-medium text-neutral-900 hover:text-neutral-600 transition-colors"
+                                >
+                                  {x.name || x.url}
+                                </a>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 align-middle max-w-80">
+                              <div
+                                onClick={(evt) => {
+                                  if (!isManualOverride && hasMetadata) {
+                                    evt.stopPropagation();
+                                    openUnverifiedModal();
+                                  }
+                                  return;
+                                }}
+                                className={`relative flex min-h-[72px] flex-col justify-center gap-1 pr-6 ${!isManualOverride && hasMetadata ? "cursor-pointer" : ""}`}
                               >
-                                {x.name || x.url}
-                              </a>
-                            </td>
-                            <td className="px-6 py-4 align-top">
-                              {reason || diffBlock ? (
-                                <div className="rounded border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 shadow-sm">
-                                  <div className="font-semibold">
-                                    {panelTitle}
-                                  </div>
-                                  {metaBits.length > 0 && (
-                                    <div className="mt-1 text-[11px] text-amber-800">
-                                      {metaBits.join(" · ")}
-                                    </div>
-                                  )}
-                                  {diffBlock ? (
-                                    <pre className="mt-2 whitespace-pre-wrap font-mono text-[11px] leading-snug text-amber-900">
-                                      {diffBlock}
-                                    </pre>
+                                {!isManualOverride ? (
+                                  hasMetadata ? (
+                                    <>
+                                      <div className="flex items-baseline gap-2 text-sm overflow-hidden">
+                                        <span className="flex-1 truncate text-green-600 font-medium">
+                                          {storedDisplay}
+                                        </span>
+                                        <span className="text-neutral-400">
+                                          ·
+                                        </span>
+                                        <span className="flex-1 truncate text-amber-600 font-medium">
+                                          {scrapedDisplay}
+                                        </span>
+                                      </div>
+                                      {metaLine.length > 0 && (
+                                        <div className="space-y-0.5">
+                                          <p className="text-xs text-neutral-500 truncate">
+                                            {metaLine.join(" · ")}
+                                          </p>
+                                        </div>
+                                      )}
+                                    </>
                                   ) : (
-                                    <p className="mt-2 text-[11px]">
-                                      No differing value captured.
+                                    <p className="text-sm text-neutral-600">
+                                      No unverification metadata recorded.
                                     </p>
-                                  )}
-                                </div>
-                              ) : (
-                                <p className="text-xs text-neutral-500">
-                                  No unverification metadata recorded.
-                                </p>
-                              )}
+                                  )
+                                ) : (
+                                  <div className="flex min-h-[72px] flex-col justify-center">
+                                    <p
+                                      className={`text-sm line-clamp-2 ${flag ? "text-amber-500 font-medium" : "text-neutral-600"}`}
+                                    >
+                                      {sec || "Unverifiable"}
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
                             </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center justify-end gap-2">
+                            <td className="px-6 py-4 align-middle max-w-80">
+                              <div className="flex min-h-[72px] items-center justify-end gap-2">
                                 <button
                                   disabled={tableFrozen || busy}
                                   onClick={() => {
@@ -1847,7 +2107,6 @@ ${u.is_admin ? "text-green-600" : "text-neutral-600"}`}
                                     ]);
                                   }}
                                   className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-700"
-                                  title="Edit industries"
                                 >
                                   <FiTag className="w-3.5 h-3.5" />
                                 </button>

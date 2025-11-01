@@ -175,7 +175,7 @@ export async function POST(req: Request) {
         source_url: post.source_url || "",
         author_url: post.author_url || "",
         name: post.name || "",
-        title: post.occupation || post.headline || "",
+        title: post.occupation || "",
       },
     };
   });

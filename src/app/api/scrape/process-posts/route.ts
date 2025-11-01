@@ -39,11 +39,6 @@ const pickName = (x: ApifyItem) => {
   return [fn, ln].filter(Boolean).join(" ").trim();
 };
 
-const pickHead = (x: ApifyItem) => {
-  if (x?.isActivity) return "";
-  return cleanText(x?.authorHeadline || "");
-};
-
 export async function POST(req: Request) {
   console.log("[process-posts] Starting batch processing");
 
@@ -164,13 +159,10 @@ export async function POST(req: Request) {
 
     const name = pickName(item);
     const occupation = pickOcc(item);
-    const headline = pickHead(item);
 
     const profileOccupation = cleanText(profile.occupation || "");
-    const profileHeadline = cleanText(profile.headline || "");
 
     const validOcc = !!(occupation && rx.test(occupation));
-    const validHead = !!(headline && rx.test(headline));
 
     if (profileOccupation && validOcc && profileOccupation !== occupation) {
       console.log(
@@ -178,7 +170,6 @@ export async function POST(req: Request) {
       );
       const detectedAt = new Date().toISOString();
       const details = {
-        field: "occupation",
         stored_value: profile.occupation,
         stored_value_normalized: profileOccupation,
         scraped_value: occupation,
@@ -193,37 +184,6 @@ export async function POST(req: Request) {
         .from("linkedin")
         .update({
           allowed: false,
-          unverified_reason: "Occupation mismatch",
-          unverified_details: details,
-          unverified_at: detectedAt,
-        })
-        .eq("id", profile.id);
-      skipped++;
-      continue;
-    }
-
-    if (profileHeadline && validHead && profileHeadline !== headline) {
-      console.log(
-        `[process-posts] Headline mismatch for ${profileUrl}: "${profile.headline}" != "${headline}"`,
-      );
-      const detectedAt = new Date().toISOString();
-      const details = {
-        field: "headline",
-        stored_value: profile.headline,
-        stored_value_normalized: profileHeadline,
-        scraped_value: headline,
-        scraped_value_normalized: headline,
-        pipeline_job_id: job.id,
-        apify_run_id: job.apify_run_id,
-        apify_run_started_at: runStartedAt,
-        dataset_id: datasetId,
-        dataset_index: globalIndex,
-      };
-      await supa
-        .from("linkedin")
-        .update({
-          allowed: false,
-          unverified_reason: "Headline mismatch",
           unverified_details: details,
           unverified_at: detectedAt,
         })
@@ -250,8 +210,43 @@ export async function POST(req: Request) {
       continue;
     }
 
-    if (!item.postedAtTimestamp || item.postedAtTimestamp < oneDayAgo) {
-      console.log(`[process-posts] Skipping: post older than 24h`);
+    const postedAtRaw = item.postedAtTimestamp ?? item.postedAtISO;
+
+    let postedAtMs: number | undefined;
+
+    if (typeof postedAtRaw === "number") {
+      postedAtMs = postedAtRaw;
+    } else if (typeof postedAtRaw === "string") {
+      const numericCandidate = Number(postedAtRaw);
+      if (Number.isFinite(numericCandidate)) {
+        postedAtMs = numericCandidate;
+      } else {
+        const parsed = Date.parse(postedAtRaw);
+        if (!Number.isNaN(parsed)) {
+          postedAtMs = parsed;
+        }
+      }
+    }
+
+    if (postedAtMs === undefined && item.postedAtISO) {
+      const isoParsed = Date.parse(item.postedAtISO);
+      if (!Number.isNaN(isoParsed)) {
+        postedAtMs = isoParsed;
+      }
+    }
+
+    if (
+      postedAtMs === undefined ||
+      Number.isNaN(postedAtMs) ||
+      postedAtMs < oneDayAgo
+    ) {
+      const postedAtLog =
+        postedAtMs === undefined || Number.isNaN(postedAtMs)
+          ? "missing"
+          : new Date(postedAtMs).toISOString();
+      console.log(
+        `[process-posts] Skipping: post older than 24h (postedAt=${postedAtLog}, threshold=${new Date(oneDayAgo).toISOString()})`,
+      );
       skipped++;
       continue;
     }
@@ -267,14 +262,14 @@ export async function POST(req: Request) {
     const industryIds = profile.industry_ids || [];
     const sourceUrl = item.url || "";
     const authorUrl = item.inputUrl || profileUrl;
+    const postedAtIso = new Date(postedAtMs).toISOString();
 
     const { error } = await supa.from("posts").insert({
       urn: item.urn,
       name: name || null,
       occupation: validOcc ? occupation : null,
-      headline: validHead ? headline : null,
       text,
-      posted_at: new Date(item.postedAtTimestamp).toISOString(),
+      posted_at: postedAtIso,
       industry_ids: industryIds,
       source_url: sourceUrl,
       author_url: authorUrl,
@@ -321,13 +316,13 @@ export async function POST(req: Request) {
       updateData.current_batch_offset = 0;
       updateData.total_items = 0;
     } else {
-      const { data: recentCount } = await supa
+      const { data: recent } = await supa
         .from("posts")
-        .select("id", { count: "exact", head: true })
+        .select("id")
         .gte("created_at", cutoff)
         .overlaps("industry_ids", visibleIds);
 
-      const remaining = (recentCount as any)?.count || 0;
+      const remaining = (recent as any)?.length ?? 0;
 
       if (remaining === 0) {
         console.log(

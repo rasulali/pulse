@@ -62,7 +62,7 @@ The CONTEXT contains multiple numbered excerpts. Each excerpt is structured as:
 [N]
 TEXT: [post content]
 AUTHOR: [name]
-AUTHOR_TITLE: [occupation or headline]
+AUTHOR_TITLE: [occupation]
 AUTHOR_URL: [LinkedIn profile URL]
 SOURCE_URL: [LinkedIn post URL]
 ---

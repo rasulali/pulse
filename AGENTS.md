@@ -167,7 +167,8 @@
         "effect": "Run APIFY actor sync with 8GB; uses config table settings",
         "notes": [
             "Normalizes scraped name/occupation/headline text (NFKC, zero-width removed, whitespace collapsed) before validating characters",
-            "Sets occupation/headline only when the normalized strings contain readable characters (rx test); occupation takes precedence over headline for allowed flag"
+            "Sets occupation/headline only when the normalized strings contain readable characters (rx test); occupation takes precedence over headline for allowed flag",
+            "Leaves allowed untouched; review stays manual"
         ]
     },
     "/api/links/refresh-one": {
@@ -178,7 +179,8 @@
         },
         "effect": "Run actor sync for a single linkedin.url",
         "notes": [
-            "Applies same normalized text validation as /api/links/refresh prior to updating occupation/headline/allowed"
+            "Applies same normalized text validation as /api/links/refresh prior to updating occupation/headline",
+            "Does not change allowed; manual toggle still required after review"
         ]
     },
     "/api/register": {
@@ -276,7 +278,7 @@
             "  - Extract profile URL, find linkedin profile",
             "  - Extract occupation/headline with fallbacks; normalize (NFKC, remove zero-width, collapse whitespace)",
             "  - Verify: if profile.occupation exists, compare normalized strings; if profile.headline exists, compare normalized strings",
-            "  - If mismatch: set allowed=false, capture unverified_reason/details/unverified_at (diff + run metadata), skip",
+            "  - If mismatch: set allowed=false, capture unverified_details/unverified_at (diff + run metadata), skip",
             "  - Check URN exists in posts (deduplicate)",
             "  - Filter posts older than 24h",
             "  - Clean text (emojis, control chars, whitespace)",
@@ -627,12 +629,6 @@ to authenticated using (true);
                     "name": "updated_at",
                     "type": "timestamptz",
                     "default": "now()"
-                },
-                {
-                    "name": "unverified_reason",
-                    "type": "text",
-                    "not_null": false,
-                    "description": "Human-readable reason why profile was unverified (e.g., 'Occupation mismatch')"
                 },
                 {
                     "name": "unverified_details",
@@ -1244,8 +1240,9 @@ cancelled ←+----+------+------------+------------+-----------+ (future: termin
    - Use cases: Stop runaway jobs, debug issues, manually control pipeline timing
 
 12. **Profile unverification tracking & diff** (COMPLETED)
-    - Pipeline writes `unverified_reason`, `unverified_details`, and `unverified_at` whenever occupation/headline mismatches are detected (includes stored vs scraped values, run ID, dataset index).
-    - Admin dashboard renders a git-style diff between stored and scraped values plus run metadata (e.g., "31 Oct 2025 · Run xyz") inside the Not Allowed table.
+    - Pipeline writes `unverified_details` and `unverified_at` whenever occupation/headline mismatches are detected (includes stored vs scraped values, run ID, dataset index).
+    - `unverified_details` excludes legacy `field` metadata; UI infers context directly from stored vs scraped values.
+    - Admin dashboard renders a diff between stored and scraped values plus run metadata (e.g., "Date : 31 Oct 2025 · job : 92 · run : 8DG…") inside the Not Allowed table.
     - Allowing a profile again clears unverification metadata so future mismatches can be tracked cleanly.
 
 ------

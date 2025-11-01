@@ -32,11 +32,6 @@ const pickName = (x: ApifyItem) => {
   return [fn, ln].filter(Boolean).join(" ").trim();
 };
 
-const pickHead = (x: ApifyItem) => {
-  if (x?.isActivity) return "";
-  return cleanText(x?.authorHeadline || "");
-};
-
 export async function POST(req: Request) {
   const body = (await req.json()) as Partial<Body>;
   if (!Number.isFinite(body.id as number))
@@ -54,7 +49,7 @@ export async function POST(req: Request) {
 
   const { data: row } = await supa
     .from("linkedin")
-    .select("id,url")
+    .select("id,url,allowed")
     .eq("id", body.id as number)
     .single();
   if (!row?.url) return NextResponse.json({ ok: false }, { status: 404 });
@@ -92,19 +87,16 @@ export async function POST(req: Request) {
   const it = items[0] as ApifyItem;
   const name = pickName(it);
   const occ = pickOcc(it);
-  const head = pickHead(it);
 
   const validOcc = !!(occ && rx.test(occ));
-  const validHead = !validOcc && !!(head && rx.test(head));
-  const allowed = validOcc || validHead;
 
   const { data, error } = await supa
     .from("linkedin")
     .update({
       name: name || null,
       occupation: validOcc ? occ : null,
-      headline: validHead ? head : null,
-      allowed,
+      unverified_details: null,
+      unverified_at: null,
     })
     .eq("id", row.id)
     .select("id");

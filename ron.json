@@ -1,0 +1,92 @@
+[
+  {
+    "type": "article",
+    "article": {
+      "type": "FIRST_PARTY",
+      "urn": "urn:li:linkedInArticle:7390072321178247168",
+      "url": "https://www.linkedin.com/pulse/reflections-from-2025-paris-peace-forum-benjamin-jenson-xs9ne?trackingId=sw4a9x%2FN45oa6UPvjwt1mw%3D%3D",
+      "title": "Reflections from the 2025 Paris Peace Forum",
+      "description": "Noelle Huskins Madden and I participated in the Paris Peace Forum this week, where leaders, practitioners, and innovators gathered to explore how we c",
+      "largeImage": "https://media.licdn.com/dms/image/v2/D4E12AQH0zCLdVlaoVw/article-cover_image-shrink_600_2000/B4EZo7WIX_HUAQ-/0/1761932250919?e=1763596800&v=beta&t=Tib9R0kXwwWcU_jOH0T8-8oVN-DpXbpLXKOQXE0ITN4"
+    },
+    "isActivity": true,
+    "activityDescription": "Ron Done reposted this",
+    "activityOfUser": {
+      "firstName": "Ron",
+      "lastName": "Done",
+      "occupation": "Senior Accountant @ JPMORGAN",
+      "id": "934940155",
+      "publicId": "ron-done-3b7139221",
+      "trackingId": "Hl3azQrWSlORoJ6Ukqdt7Q==",
+      "profileId": "ACoAADe6DfsBkufT9g0LrV3CWEXjZise1uVCRqU"
+    },
+    "urn": "urn:li:activity:7390139329517355009",
+    "url": "https://www.linkedin.com/posts/benjaminjenson_noelle-huskins-maddenand-i-participated-ugcPost-7390080114480545792-qbNn?utm_source=combined_share_message&utm_medium=member_desktop&rcm=ACoAAF_FPWEB-KwYruHlmIUbEN3qSqUs6UhlGTA",
+    "timeSincePosted": "3h",
+    "shareUrn": "urn:li:ugcPost:7390080114480545792",
+    "text": "Noelle Huskins Madden and I participated in the Paris Peace Forum this week, where leaders, practitioners, and innovators gathered to explore how we can sustain cooperation in an era of fragmentation. Across the sessions I joined—from child wellbeing to development finance to natural resource governance —a clear story emerged: we’re living through a radical re-ordering of the global health and development ecosystem. In the linked article I share the three themes that stood out to me.",
+    "attributes": [
+      {
+        "start": 0,
+        "length": 21,
+        "type": "PROFILE_MENTION",
+        "profile": {
+          "firstName": "Noelle",
+          "lastName": "Huskins Madden",
+          "occupation": "Director @ Camber Collective",
+          "id": "13539241",
+          "publicId": "noelle-huskins-madden-26164b4",
+          "trackingId": "gLiA1b+oS46ZCknt2V/8vA==",
+          "profileId": "ACoAAADOl6kBtPfUrcZam64xdMcIdnRUYiGtVC0",
+          "picture": "https://media.licdn.com/dms/image/v2/D5603AQFw2f1iOH82-w/profile-displayphoto-scale_100_100/B56Zorilh9HkAg-/0/1761667078953?e=1763596800&v=beta&t=gqPYDzl0j19jTV-yciLA6Y2uhtNWsYcQio1-P4R_cyw"
+        }
+      },
+      {
+        "start": 48,
+        "length": 17,
+        "type": "COMPANY_NAME",
+        "company": {
+          "name": "Paris Peace Forum",
+          "universalName": "parispeaceforum",
+          "trackingId": "8dX83CCgSCWOt8Eim9kzWA==",
+          "active": true,
+          "showcase": false,
+          "entityUrn": "urn:li:fs_miniCompany:28634425",
+          "logoUrl": "https://media.licdn.com/dms/image/v2/D4E0BAQGyoXl0PuX36w/company-logo_200_200/B4EZaq.UpNHcAM-/0/1746625186888/parispeaceforum_logo?e=1763596800&v=beta&t=Zi_IK_yykQvL9pCJFpQYkzlAUJxXADpqEbCdokZbQAs"
+        }
+      }
+    ],
+    "comments": [],
+    "reactions": [],
+    "numShares": 2,
+    "numLikes": 8,
+    "numComments": 0,
+    "canReact": true,
+    "canPostComments": true,
+    "canShare": true,
+    "commentingDisabled": false,
+    "allowedCommentersScope": "ALL",
+    "rootShare": true,
+    "shareAudience": "PUBLIC",
+    "author": {
+      "firstName": "Benjamin",
+      "lastName": "Jenson",
+      "occupation": "Partner at Camber Collective, Global Health Sector Lead",
+      "id": "39756488",
+      "publicId": "benjaminjenson",
+      "trackingId": "xeVGOB+kS6yYsRvPaQjgmA==",
+      "profileId": "ACoAAAJeosgBYEJaA6OEbj7mMXdbIuQFl4Sz3gk",
+      "picture": "https://media.licdn.com/dms/image/v2/C5603AQFBXpnH43KSlQ/profile-displayphoto-shrink_100_100/profile-displayphoto-shrink_100_100/0/1625856251838?e=1763596800&v=beta&t=8G3yU22gwLAguutxxBofiuuzjjv99OKUXJH-LKkU-nc"
+    },
+    "authorProfileId": "benjaminjenson",
+    "authorProfilePicture": "https://media.licdn.com/dms/image/v2/C5603AQFBXpnH43KSlQ/profile-displayphoto-shrink_100_100/profile-displayphoto-shrink_100_100/0/1625856251838?e=1763596800&v=beta&t=8G3yU22gwLAguutxxBofiuuzjjv99OKUXJH-LKkU-nc",
+    "authorType": "Person",
+    "authorHeadline": "Partner at Camber Collective, Global Health Sector Lead",
+    "authorName": "Benjamin Jenson",
+    "authorProfileUrl": "https://www.linkedin.com/in/benjaminjenson?miniProfileUrn=urn%3Ali%3Afs_miniProfile%3AACoAAAJeosgBYEJaA6OEbj7mMXdbIuQFl4Sz3gk",
+    "authorUrn": "urn:li:member:39756488",
+    "postedAtTimestamp": 1761946518306,
+    "postedAtISO": "2025-10-31T21:35:18.306Z",
+    "inputUrl": "https://www.linkedin.com/in/ron-done-3b7139221"
+  }
+]

@@ -2,11 +2,11 @@ export type ApifyItem = {
   inputUrl?: string;
   url?: string;
   authorProfileUrl?: string;
-  authorHeadline?: string;
   isActivity?: boolean;
   urn?: string;
   text?: string;
-  postedAtTimestamp?: number;
+  postedAtTimestamp?: number | string;
+  postedAtISO?: string;
   author?: {
     occupation?: string;
     publicId?: string;

@@ -14,7 +14,6 @@ export async function POST() {
     .from("linkedin")
     .update({
       allowed: true,
-      unverified_reason: null,
       unverified_details: null,
       unverified_at: null,
     })

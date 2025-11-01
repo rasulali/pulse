@@ -19,7 +19,7 @@ export default {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${env.CRON_SECRET}`,
+          Authorization: `Bearer ${env.CRON_SECRET}`,
         },
       });
 

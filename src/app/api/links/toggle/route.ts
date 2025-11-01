@@ -18,7 +18,6 @@ export async function POST(req: Request) {
   const supa = sadmin();
   const updateData: Record<string, unknown> = { allowed: body.next };
   if (body.next) {
-    updateData.unverified_reason = null;
     updateData.unverified_details = null;
     updateData.unverified_at = null;
   }

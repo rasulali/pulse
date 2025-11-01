@@ -38,11 +38,6 @@ const pickName = (x: ApifyItem) => {
   return [fn, ln].filter(Boolean).join(" ").trim();
 };
 
-const pickHead = (x: ApifyItem) => {
-  if (x?.isActivity) return "";
-  return cleanText(x?.authorHeadline || "");
-};
-
 export async function POST() {
   const supa = sadmin();
   const { data: cfg } = await supa
@@ -87,7 +82,7 @@ export async function POST() {
   const items = (await res.json()) as ApifyItem[] | unknown;
   if (!Array.isArray(items)) return NextResponse.json({ ok: true, updated: 0 });
 
-  const map: Record<string, { name: string; occ: string; head: string }> = {};
+  const map: Record<string, { name: string; occ: string }> = {};
   for (const it of items as ApifyItem[]) {
     const target = norm(
       it?.inputUrl ||
@@ -102,22 +97,19 @@ export async function POST() {
     if (!target) continue;
     const name = pickName(it);
     const occ = pickOcc(it);
-    const head = pickHead(it);
-    map[target] = { name, occ, head };
+    map[target] = { name, occ };
   }
 
   let updated = 0;
   for (const [u, v] of Object.entries(map)) {
     const validOcc = !!(v.occ && rx.test(v.occ));
-    const validHead = !validOcc && !!(v.head && rx.test(v.head));
-    const allowed = validOcc || validHead;
     const { data, error } = await supa
       .from("linkedin")
       .update({
         name: v.name || null,
         occupation: validOcc ? v.occ : null,
-        headline: validHead ? v.head : null,
-        allowed,
+        unverified_details: null,
+        unverified_at: null,
       })
       .eq("url", u)
       .select("id");
